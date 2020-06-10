@@ -17,6 +17,7 @@ import gr.ds.unipi.qtree.Node;
 import gr.ds.unipi.qtree.QuadTree;
 import scala.Tuple2;
 import gr.ds.unipi.qtree.Point;
+import gr.ds.unipi.qtree.PointComparator;
 import gr.ds.unipi.qtree.NodePointPair;
 
 
@@ -34,7 +35,7 @@ public class App
         SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
         conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
-        	Point[].class, Node[].class, NodePointPair.class, MathUtils.class, FileWriter.class});
+        	Point[].class, Node[].class, NodePointPair.class, MathUtils.class, PointComparator.class});
         JavaSparkContext sc = new JavaSparkContext(conf);
         
         // Constant parameters
@@ -200,6 +201,19 @@ public class App
         	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), point).iterator();
         });
         
+        
+        JavaPairRDD<Node, Iterable<Point>> test =  nodePointPairs1.mapToPair(pair -> pair.swap()).sortByKey(new PointComparator()).mapToPair(pair -> pair.swap()).groupByKey();
+        List<Tuple2<Node, Iterable<Point>>> out = test.take(2);
+        for (Tuple2<Node, Iterable<Point>> pair : out) {
+        	System.out.println(String.format("Node id: %d", pair._1.getId()));
+        	for (Point p : pair._2) {
+        		System.out.println(String.format("Point tag: %d", p.getTag()));
+        		
+        	}
+        }
+        
+        sc.close();
+        System.exit(0);
 //        JavaPairRDD<Node, Point> nodePointPairs2 = points2.flatMapToPair(point -> {
 //        	QuadTree qt = broadcastQuadTree.getValue();
 //        	double mbrUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
@@ -219,10 +233,6 @@ public class App
         
         // ************* END LOCAL INDEXING PHASE *************
         
-        
-        
-        JavaPairRDD<Node, Iterable<Point>> groupByNode = nodePointPairs1.groupByKey();
-        groupByNode.saveAsTextFile(OUTPUT_PATH + "New");
 //        groupByNode.foreach(pair -> {        
 //        	ArrayList<Point> points = new ArrayList<Point>();
 //        	for (Point point : pair._2) {
