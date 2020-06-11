@@ -64,9 +64,9 @@ public class SpatialJoinTest extends TestCase
     	
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
-    	double radius = 352;
+    	double radius = 400;
     	
-    	JavaRDD<Tuple2<Point, Point>> out = sj.reduce(broadcastQuadTree, points, radius);
+    	JavaRDD<Tuple2<Point, Point>> out = sj.reduce(broadcastQuadTree, points, radius, 0.5 , new String[] {"italian", "gourmet"});
     	for ( Tuple2<Point, Point> pp : out.collect()) {
     		System.out.println(pp._1.toString() + " - " + pp._2.toString()); 
     	}

@@ -71,13 +71,15 @@ public class SpatialJoin {
         		}
     		}
         	
-    		return new Point(Double.parseDouble(lon), Double.parseDouble(lat), fileTag);         	
+        	String[] keywords = line.substring(StringUtils.ordinalIndexOf(line, fileseparator, 2) + 1, StringUtils.ordinalIndexOf(line, fileseparator, 3)).split("\\|");
+        	
+    		return new Point(Double.parseDouble(lon), Double.parseDouble(lat), fileTag, keywords);         	
         });
         
         return points;
 	}
 	
-	public JavaRDD<Tuple2<Point, Point>> reduce(Broadcast<QuadTree> broadcastQuadTree, JavaRDD<Point> points, double radius) {
+	public JavaRDD<Tuple2<Point, Point>> reduce(Broadcast<QuadTree> broadcastQuadTree, JavaRDD<Point> points, double radius, double similarityScore, String[] keywords) {
 		
         JavaPairRDD<Integer, Iterable<Point>> nodePointPairs = points.flatMapToPair(point -> {
         	QuadTree qt = broadcastQuadTree.getValue();
@@ -102,7 +104,7 @@ public class SpatialJoin {
         		}
         		
         		for (Point p : local) {
-        			if (MathUtils.haversineDistance(p, point) <= radius) {
+        			if (MathUtils.haversineDistance(p, point) <= radius && MathUtils.jaccardSimilarity(keywords, point.getKeywords()) >= similarityScore) {
         				output.add(new Tuple2<Point, Point>(p, point));
         				//System.out.println(String.format("(%d, %d)", p.getTag(), point.getTag()));
         			}
