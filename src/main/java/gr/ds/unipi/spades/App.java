@@ -18,6 +18,7 @@ import gr.ds.unipi.qtree.QuadTree;
 import scala.Tuple2;
 import gr.ds.unipi.qtree.Point;
 import gr.ds.unipi.qtree.PointComparator;
+import gr.ds.unipi.qtree.NodePartitioner;
 import gr.ds.unipi.qtree.NodePointPair;
 
 
@@ -35,7 +36,7 @@ public class App
         SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
         conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
-        	Point[].class, Node[].class, NodePointPair.class, MathUtils.class, PointComparator.class});
+        	Point[].class, Node[].class, NodePointPair.class, MathUtils.class, PointComparator.class, NodePartitioner.class});
         JavaSparkContext sc = new JavaSparkContext(conf);
         
         // Constant parameters
@@ -49,7 +50,7 @@ public class App
     	
     	double samplePecentage = 0.01;
     	double epsilon = 0.000001;
-    	int pointsPerLeaf = 1_000;
+    	int pointsPerLeaf = 10_000;
     	int samplePointsPerLeaf = (int) (pointsPerLeaf * samplePecentage);
     	String file1Name = "hotels.txt";
     	String file2Name = "restaurants.txt";
@@ -121,39 +122,6 @@ public class App
     		return new Point(Double.parseDouble(lon), Double.parseDouble(lat), fileTag);         	
         });
         
-//        JavaRDD<Point> points2 = file2.map(line -> {
-//        	String lon, lat;
-//        	int lonOrdinalIndex, latOrdinalIndex;
-//        	if (file2lonIndex == 0) {
-//    			lon = line.substring(0, line.indexOf(file2separator));
-//    		} else {
-//    			lonOrdinalIndex = StringUtils.ordinalIndexOf(line, file2separator, file2lonIndex);
-//    			
-//    			if (lonOrdinalIndex == StringUtils.lastOrdinalIndexOf(line, file2separator, 1))
-//        		{
-//        			lon =  line.substring(lonOrdinalIndex + 1);
-//        		} else {
-//        			lon = line.substring(lonOrdinalIndex + 1, StringUtils.ordinalIndexOf(line, file2separator, file2lonIndex + 1));
-//        		}    			
-//    		}
-//    		
-//    		
-//        	if (file2latIndex == 0) {
-//    			lat = line.substring(0, line.indexOf(file2separator));
-//    		} else {
-//    			latOrdinalIndex = StringUtils.ordinalIndexOf(line, file2separator, file2latIndex);
-//    			
-//    			if (latOrdinalIndex == StringUtils.lastOrdinalIndexOf(line, file2separator, 1))
-//        		{
-//        			lat =  line.substring(latOrdinalIndex + 1);
-//        		} else {
-//        			lat = line.substring(latOrdinalIndex + 1, StringUtils.ordinalIndexOf(line, file2separator, file2latIndex + 1));
-//        		}
-//    		}
-//        	
-//    		return new Point(Double.parseDouble(lon), Double.parseDouble(lat), 2);         	
-//        });
-        
         
         // ************* GLOBAL INDEXING PHASE *************        
         // Insert a sample of the data set (1% of total size) into the quad tree
@@ -188,7 +156,7 @@ public class App
         
         Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(quadTree);
         
-        JavaPairRDD<Node, Point> nodePointPairs1 = points1.flatMapToPair(point -> {
+        JavaPairRDD<Integer, Iterable<Point>> nodePointPairs1 = points1.flatMapToPair(point -> {
         	QuadTree qt = broadcastQuadTree.getValue();
         	if (point.getTag() == 1)
         		return qt.assignToLeafNodeIterator(qt.getRoot(), point).iterator();
@@ -199,55 +167,33 @@ public class App
         	double mbrLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
         	point.setMBR(mbrLowerX, mbrLowerY, mbrUpperX, mbrUpperY);
         	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), point).iterator();
-        });
+        }).groupByKey();
         
-        
-        JavaPairRDD<Node, Iterable<Point>> test =  nodePointPairs1.mapToPair(pair -> pair.swap()).sortByKey(new PointComparator()).mapToPair(pair -> pair.swap()).groupByKey();
-        List<Tuple2<Node, Iterable<Point>>> out = test.take(2);
-        for (Tuple2<Node, Iterable<Point>> pair : out) {
-        	System.out.println(String.format("Node id: %d", pair._1.getId()));
-        	for (Point p : pair._2) {
-        		System.out.println(String.format("Point tag: %d", p.getTag()));
+        nodePointPairs1.foreach(pair -> {
+        	ArrayList<Point> local = new ArrayList<Point>();
+        	for (Point point : pair._2) {
+        		if (point.getTag() == 1) { 
+        			local.add(point);
+        			continue;
+        		}
         		
+        		for (Point p : local) {
+        			if (MathUtils.haversineDistance(p, point) <= radius) {
+        				System.out.println(String.format("(%d, %d)", p.getTag(), point.getTag()));
+        			}
+        		}
         	}
-        }
-        
+        });
+        		
         sc.close();
-        System.exit(0);
-//        JavaPairRDD<Node, Point> nodePointPairs2 = points2.flatMapToPair(point -> {
-//        	QuadTree qt = broadcastQuadTree.getValue();
-//        	double mbrUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
-//        	double mbrLowerY = MathUtils.getPointInDistanceAndBearing(point, radius, 180).getY();
-//        	double mbrUpperX = MathUtils.getPointInDistanceAndBearing(point, radius, 90).getX();
-//        	double mbrLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
-//        	point.setMBR(mbrLowerX, mbrLowerY, mbrUpperX, mbrUpperY);
-//        	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), point).iterator();
-//        });
-//        
+        System.exit(0);        
         
         
-        JavaPairRDD<Node, Integer> leaves = nodePointPairs1.aggregateByKey(0, (sum, point) -> sum + 1, (totalSum, sum) -> totalSum + sum);
+        JavaPairRDD<Integer, Integer> leaves = nodePointPairs1.aggregateByKey(0, (sum, point) -> sum + 1, (totalSum, sum) -> totalSum + sum);
         leaves.foreach(pair -> {
-        	System.out.println(String.format("Leaf with id %d contains %d points", pair._1.getId(), pair._2));
+        	System.out.println(String.format("Leaf with id %d contains %d points", pair._1, pair._2));
         });
         
         // ************* END LOCAL INDEXING PHASE *************
-        
-//        groupByNode.foreach(pair -> {        
-//        	ArrayList<Point> points = new ArrayList<Point>();
-//        	for (Point point : pair._2) {
-//        		if (point.getTag() == 1) {
-//        			points.add(point);
-//        			continue;
-//        		}
-//        		
-//        		for (Point p : points) {
-//        			if (MathUtils.haversineDistance(p, point) <= radius) {
-//        				
-//            		}
-//        		}
-//        		
-//        	}
-//        });
     }
 }
