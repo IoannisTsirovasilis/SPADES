@@ -10,7 +10,10 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.FlatMapFunction;
+import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.storage.StorageLevel;
 
 import gr.ds.unipi.qtree.MathUtils;
 import gr.ds.unipi.qtree.Node;
@@ -30,170 +33,44 @@ public class App
 {
 	private static final String FILE_PATH = "F:\\OneDrive\\Documents\\SPADES Project\\Working Drafts\\Files\\"; //"hdfs://localhost:9000/user/test/";
 	private static final String OUTPUT_PATH = "C:/Users/Ioannis/Desktop/";
+	public static JavaRDD<Tuple2<Point, Point>> out;
     public static void main( String[] args ) throws IOException
     {   	
     	// Initialize spark context
-        SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
+    	SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
         conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
         	Point[].class, Node[].class, NodePointPair.class, MathUtils.class, PointComparator.class, NodePartitioner.class});
         JavaSparkContext sc = new JavaSparkContext(conf);
+
+    	SpatialJoin sj = new SpatialJoin();
+    	String pathToCsv = FILE_PATH + "u_100k.txt," + FILE_PATH + "uw_100k.txt";
+    	JavaRDD<String> file = sc.textFile(pathToCsv);
+    	    	
+    	JavaRDD<Point> points = sj.map(file);
+    	points.persist(StorageLevel.MEMORY_ONLY());
+    	double minX = 0;
+    	double minY = 0;
+    	double maxX = 50;
+    	double maxY = 50;
+    	int samplePointsPerLeaf = 100;
+    	double samplePercentage = 0.01;
+    	double similarityScore = 0.3;
+    	
+    	long startTime = System.nanoTime();
         
-        // Constant parameters
-        int file1lonIndex = 5;
-    	int file1latIndex = 4;
-    	String file1separator = "|";
+    	QuadTree qt = sj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, samplePercentage, points);
+    	long elapsedTime1 = System.nanoTime() - startTime;  
     	
-    	int file2lonIndex = 4;
-    	int file2latIndex = 3;
-    	String file2separator = "|";
-    	
-    	double samplePecentage = 0.01;
-    	double epsilon = 0.000001;
-    	int pointsPerLeaf = 10_000;
-    	int samplePointsPerLeaf = (int) (pointsPerLeaf * samplePecentage);
-    	String file1Name = "hotels.txt";
-    	String file2Name = "restaurants.txt";
-    	
-    	double minX = -130, minY = -60, maxX = 60, maxY = 80;
-    	
-    	// query radius (kilometers)
+    	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	double radius = 2;
-        
-        // Read sample file
-        System.out.println("Reading file...");
-        JavaRDD<String> file1 = sc.textFile(FILE_PATH + file1Name + "," + FILE_PATH + file2Name);
-        //JavaRDD<String> file2 = sc.textFile(FILE_PATH + file2Name);
-        System.out.println("File read.");
-        
-        // Create (empty) quad tree at MASTER node
-        QuadTree quadTree = new QuadTree(minX - epsilon, minY - epsilon, maxX + epsilon, maxY + epsilon, samplePointsPerLeaf);
-        
-        // Map
-        // Extract point information
-        JavaRDD<Point> points1 = file1.map(line -> {
-        	String lon, lat;
-        	int lonOrdinalIndex, latOrdinalIndex;
-        	int filelonIndex, filelatIndex;
-        	int fileTag;
-        	String fileseparator;
-        	
-        	// Hotels
-        	if (StringUtils.countMatches(line, '|') == 6) {
-        		filelonIndex = 5;
-        		filelatIndex = 4;
-        		fileseparator = "|";
-        		fileTag = 1;
-        	// Restaurants
-        	} else {
-        		filelonIndex = 4;
-        		filelatIndex = 3;
-        		fileseparator = "|";
-        		fileTag = 2;
-        	}
-        	
-        	if (filelonIndex == 0) {
-    			lon = line.substring(0, line.indexOf(fileseparator));
-    		} else {
-    			lonOrdinalIndex = StringUtils.ordinalIndexOf(line, file1separator, filelonIndex);
-    			
-    			if (lonOrdinalIndex == StringUtils.lastOrdinalIndexOf(line, fileseparator, 1))
-        		{
-        			lon =  line.substring(lonOrdinalIndex + 1);
-        		} else {
-        			lon = line.substring(lonOrdinalIndex + 1, StringUtils.ordinalIndexOf(line, fileseparator, filelonIndex + 1));
-        		}    			
-    		}
-    		
-    		
-        	if (filelatIndex == 0) {
-    			lat = line.substring(0, line.indexOf(fileseparator));
-    		} else {
-    			latOrdinalIndex = StringUtils.ordinalIndexOf(line, fileseparator, filelatIndex);
-    			
-    			if (latOrdinalIndex == StringUtils.lastOrdinalIndexOf(line, fileseparator, 1))
-        		{
-        			lat =  line.substring(latOrdinalIndex + 1);
-        		} else {
-        			lat = line.substring(latOrdinalIndex + 1, StringUtils.ordinalIndexOf(line, fileseparator, filelatIndex + 1));
-        		}
-    		}
-        	
-    		return new Point(Double.parseDouble(lon), Double.parseDouble(lat), fileTag);         	
-        });
-        
-        
-        // ************* GLOBAL INDEXING PHASE *************        
-        // Insert a sample of the data set (1% of total size) into the quad tree
-        
-        // sampling
-        List<Point> sample1 = points1.takeSample(false, (int) (points1.count() * samplePecentage));
-        //List<Point> sample2 = points2.takeSample(false, (int) (points2.count() * samplePecentage));
-        
-        long startTime = System.nanoTime();
-        for (Point p : sample1) {
-        	quadTree.insertPoint(p);
-        }   
-        
-//        for (Point p : sample2) {
-//        	quadTree.insertPoint(p);
-//        }  
-        long elapsedTime = System.nanoTime() - startTime;        
-     
-        quadTree.traverse();
-        
-        System.out.println("Total execution time (ms): " + elapsedTime / 1000000);
-        System.out.println("Number of contained points of Tree " + quadTree.getNumberOfInsertedPoints());
-        System.out.println(String.format("Number of Leaves: %d", quadTree.getNumberOfLeaves()));
-        System.out.println(String.format("Number of Full Leaves: %d", quadTree.getNumberOfFullLeaves()));
-        System.out.println(String.format("Number of Empty Leaves: %d", quadTree.getNumberOfEmptyLeaves()));
-        System.out.println(String.format("Points per Leaf: %f", quadTree.getMeanNumberOfPointsPerNonEmptyLeaf()));
-        System.out.println(String.format("Standard Deviation: %f", quadTree.getStandardDeviationNonEmptyLeaves()));
-        
-        // ************* END GLOBAL INDEXING PHASE *************
-        
-        // ************* LOCAL INDEXING PHASE *************
-        
-        Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(quadTree);
-        
-        JavaPairRDD<Integer, Iterable<Point>> nodePointPairs1 = points1.flatMapToPair(point -> {
-        	QuadTree qt = broadcastQuadTree.getValue();
-        	if (point.getTag() == 1)
-        		return qt.assignToLeafNodeIterator(qt.getRoot(), point).iterator();
-        	
-        	double mbrUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
-        	double mbrLowerY = MathUtils.getPointInDistanceAndBearing(point, radius, 180).getY();
-        	double mbrUpperX = MathUtils.getPointInDistanceAndBearing(point, radius, 90).getX();
-        	double mbrLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
-        	point.setMBR(mbrLowerX, mbrLowerY, mbrUpperX, mbrUpperY);
-        	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), point).iterator();
-        }).groupByKey();
-        
-        nodePointPairs1.foreach(pair -> {
-        	ArrayList<Point> local = new ArrayList<Point>();
-        	for (Point point : pair._2) {
-        		if (point.getTag() == 1) { 
-        			local.add(point);
-        			continue;
-        		}
-        		
-        		for (Point p : local) {
-        			if (MathUtils.haversineDistance(p, point) <= radius) {
-        				System.out.println(String.format("(%d, %d)", p.getTag(), point.getTag()));
-        			}
-        		}
-        	}
-        });
-        		
-        sc.close();
-        System.exit(0);        
-        
-        
-        JavaPairRDD<Integer, Integer> leaves = nodePointPairs1.aggregateByKey(0, (sum, point) -> sum + 1, (totalSum, sum) -> totalSum + sum);
-        leaves.foreach(pair -> {
-        	System.out.println(String.format("Leaf with id %d contains %d points", pair._1, pair._2));
-        });
-        
-        // ************* END LOCAL INDEXING PHASE *************
+    	String[] keywords = {"Coffee"};
+    	String[] keywords3 = {"Coffee", "Juices", "Mexican"};
+    	startTime = System.nanoTime();
+    	JavaRDD<Tuple2<Point, Point>> out = sj.reduce(broadcastQuadTree, points, radius, similarityScore , keywords);
+    	System.out.println(out.count());
+    	long elapsedTime2 = System.nanoTime() - startTime;  
+    	System.out.println("Quadtree create time " + elapsedTime1 / 1000000);
+    	System.out.println("Result set execution time " + elapsedTime2 / 1000000);
     }
 }
