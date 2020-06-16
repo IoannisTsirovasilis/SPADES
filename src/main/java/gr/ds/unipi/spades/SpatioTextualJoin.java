@@ -9,9 +9,11 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.broadcast.Broadcast;
 
-import gr.ds.unipi.qtree.MathUtils;
-import gr.ds.unipi.qtree.Point;
-import gr.ds.unipi.qtree.QuadTree;
+import gr.ds.unipi.spades.geometry.DataObject;
+import gr.ds.unipi.spades.geometry.FeatureObject;
+import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.quadTree.QuadTree;
+import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
 
 public class SpatioTextualJoin {
@@ -80,52 +82,51 @@ public class SpatioTextualJoin {
         	if (tag == stj.file1Tag) {
         		longitude = Double.parseDouble(stj.extractWord(line, stj.file1LonIndex, stj.separator));
         		latitude = Double.parseDouble(stj.extractWord(line, stj.file1LatIndex, stj.separator));
+        		return new DataObject(longitude, latitude);
         	} else if (tag == stj.file2Tag) {
         		longitude = Double.parseDouble(stj.extractWord(line, stj.file2LonIndex, stj.separator));
         		latitude = Double.parseDouble(stj.extractWord(line, stj.file2LatIndex, stj.separator));
         		keywords = stj.extractWord(line, stj.file2KeywordsIndex, stj.separator).split(stj.file2KeywordsSeparator);
+        		return new FeatureObject(longitude, latitude, keywords);
         	} else {
         		throw new IllegalArgumentException();
-        	}
-        	Point p = new Point(longitude, latitude, tag, keywords);
-    		return p;         	
+        	}    	
         });
         
         return points;
 	}
 	
 	// Map to pairs
-	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<QuadTree> broadcastQuadTree, 
-			Broadcast<SpatioTextualJoin> broadcastStj, double radius) {
+	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<QuadTree> broadcastQuadTree, double radius) {
 		return points.flatMapToPair(point -> {
         	// Get broadcasted values 
         	QuadTree qt = broadcastQuadTree.getValue();
-        	SpatioTextualJoin stj = broadcastStj.getValue();
         	
-        	// If the point comes from file 1, just assign it to its leaf node
-        	if (point.getTag() == stj.file1Tag)
-        		return qt.assignToLeafNodeIterator(qt.getRoot(), point).iterator();
-        	
-        	// else construct square around point with size length "radius" and center "point"   
-        	// 0, 90, 180, 270 represents navigation bearing
-        	double squareUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
-        	double squareLowerY = MathUtils.getPointInDistanceAndBearing(point, radius, 180).getY();
-        	double squareUpperX = MathUtils.getPointInDistanceAndBearing(point, radius, 90).getX();
-        	double squareLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
-        	
-        	point.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
-        	
-        	// Assign point to every leaf that intersects with the square
-        	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), point).iterator();
+        	if (point.getClass() == DataObject.class) {
+        		DataObject dataObject = (DataObject) point;
+        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
+        	} else {
+        		FeatureObject featureObject = (FeatureObject) point;
+        		// else construct square around point with size length "radius" and center "point"   
+            	// 0, 90, 180, 270 represents navigation bearing
+            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
+            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
+            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
+            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
+            	
+            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+            	
+            	// Assign point to every leaf that intersects with the square
+            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
+        	}       	
         }).groupByKey(); // group by leaf id
 	}
 	
 	// Reduce
     // Produce result set (pairs of interest)
-	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, Iterable<Point>> pairs, Broadcast<SpatioTextualJoin> broadcastStj, 
+	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, Iterable<Point>> pairs,
 			double radius, double similarityScore, String[] keywords) {        		
         resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
-        	SpatioTextualJoin stj = broadcastStj.getValue();
         	
         	// Array list to retain data objects in memory
         	ArrayList<Point> local = new ArrayList<Point>();
@@ -137,16 +138,17 @@ public class SpatioTextualJoin {
         	for (Point point : pair._2) {
         		
         		// Load data objects
-        		if (point.getTag() == stj.file1Tag) { 
+        		if (point.getClass() == DataObject.class) { 
         			local.add(point);
         			continue;
         		}
         		
         		// If it reaches this line, then it processes feature objects 
     			for (Point p : local) {
+    				FeatureObject featureObject = (FeatureObject) point;
     				// Check if it is within the provided distance AND is above the lower similarity threshold 
-        			if (MathUtils.haversineDistance(p, point) <= radius && MathUtils.jaccardSimilarity(keywords, point.getKeywords()) >= similarityScore) {
-        				output.add(new Tuple2<Point, Point>(p, point));
+        			if (MathUtils.haversineDistance(p, featureObject) <= radius && MathUtils.jaccardSimilarity(keywords, featureObject.getKeywords()) >= similarityScore) {
+        				output.add(new Tuple2<Point, Point>(p, featureObject));
         			}
         		}
         	}

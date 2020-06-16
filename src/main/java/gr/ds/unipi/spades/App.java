@@ -11,11 +11,11 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 
-import gr.ds.unipi.qtree.MathUtils;
-import gr.ds.unipi.qtree.Node;
-import gr.ds.unipi.qtree.QuadTree;
+import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.quadTree.Node;
+import gr.ds.unipi.spades.quadTree.QuadTree;
+import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
-import gr.ds.unipi.qtree.Point;
 
 
 /**
@@ -92,8 +92,8 @@ public class App
     	
     	
     	startTime = System.nanoTime();
-    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, broadcastStj, radius);
-    	JavaRDD<Tuple2<Point, Point>> out = stj.reduce(groupedPairs, broadcastStj, radius, similarityScore , keywords);
+    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius);
+    	JavaRDD<Tuple2<Point, Point>> out = stj.reduce(groupedPairs, radius, similarityScore , keywords);
     	
     	// An action is needed for the whole process to start
     	System.out.println(out.count());

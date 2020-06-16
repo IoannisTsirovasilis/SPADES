@@ -8,10 +8,10 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 
-import gr.ds.unipi.qtree.MathUtils;
-import gr.ds.unipi.qtree.Node;
-import gr.ds.unipi.qtree.Point;
-import gr.ds.unipi.qtree.QuadTree;
+import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.quadTree.Node;
+import gr.ds.unipi.spades.quadTree.QuadTree;
+import gr.ds.unipi.spades.util.MathUtils;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
@@ -55,8 +55,8 @@ public class SpatioTextualJoinTest extends TestCase
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
     	double radius = 400;
-    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, broadcastStj, radius);
-    	JavaRDD<Tuple2<Point, Point>> out = stj.reduce(groupedPairs, broadcastStj, radius, 0.6 , new String[] {"italian"});
+    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius);
+    	JavaRDD<Tuple2<Point, Point>> out = stj.reduce(groupedPairs, radius, 0.5 , new String[] {"italian"});
     	System.out.println(out.count());
     	for ( Tuple2<Point, Point> pp : out.collect()) {
     		System.out.println(pp._1.toString() + " - " + pp._2.toString()); 
