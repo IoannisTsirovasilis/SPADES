@@ -102,7 +102,7 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<Object> broadcastSpatialIndex, double radius) {
+	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, double radius) {
 		Object spatialIndex = broadcastSpatialIndex.getValue();
 		if (spatialIndex.getClass() == QuadTree.class) {
 			return points.flatMapToPair(point -> {
