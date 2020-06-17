@@ -13,6 +13,7 @@ import gr.ds.unipi.spades.geometry.DataObject;
 import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
 import gr.ds.unipi.spades.quadTree.QuadTree;
+import gr.ds.unipi.spades.regularGrid.RegularGrid;
 import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
 
@@ -69,6 +70,10 @@ public class SpatioTextualJoin {
         return quadTree;
 	}
 	
+	public RegularGrid createRegularGrid(double minX, double minY, double maxX, double maxY, int hSectors, int vSectors) {		
+		return new RegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
+	}
+	
 	// Map
     // Extract point information
 	public JavaRDD<Point> mapToPoints(JavaRDD<String> lines, Broadcast<SpatioTextualJoin> broadcastStj) {
@@ -97,29 +102,48 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<QuadTree> broadcastQuadTree, double radius) {
-		return points.flatMapToPair(point -> {
-        	// Get broadcasted values 
-        	QuadTree qt = broadcastQuadTree.getValue();
-        	
-        	if (point.getClass() == DataObject.class) {
-        		DataObject dataObject = (DataObject) point;
-        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
-        	} else {
-        		FeatureObject featureObject = (FeatureObject) point;
-        		// else construct square around point with size length "radius" and center "point"   
-            	// 0, 90, 180, 270 represents navigation bearing
-            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
-            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
-            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
-            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
-            	
-            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
-            	
-            	// Assign point to every leaf that intersects with the square
-            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
-        	}       	
-        }).groupByKey(); // group by leaf id
+	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<Object> broadcastSpatialIndex, double radius) {
+		Object spatialIndex = broadcastSpatialIndex.getValue();
+		if (spatialIndex.getClass() == QuadTree.class) {
+			return points.flatMapToPair(point -> {
+	        	// Get broadcasted values 
+	        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
+	        	
+	        	if (point.getClass() == DataObject.class) {
+	        		DataObject dataObject = (DataObject) point;
+	        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
+	        	} else {
+	        		FeatureObject featureObject = (FeatureObject) point;
+	        		// else construct square around point with size length "radius" and center "point"   
+	            	// 0, 90, 180, 270 represents navigation bearing
+	            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
+	            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
+	            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
+	            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
+	            	
+	            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+	            	
+	            	// Assign point to every leaf that intersects with the square
+	            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
+	        	}       	
+	        }).groupByKey(); // group by leaf id
+		} else if (spatialIndex.getClass() == RegularGrid.class) {
+			return points.flatMapToPair(point -> {
+	        	// Get broadcasted values 
+	        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
+	        	
+	        	if (point.getClass() == DataObject.class) {
+	        		DataObject dataObject = (DataObject) point;
+	        		return grid.assignToCellIterator(dataObject).iterator();
+	        	} else {
+	        		FeatureObject featureObject = (FeatureObject) point;
+        			return grid.assignToCellAndDuplicate(featureObject, radius).iterator();	        		
+	        	}      	
+	        }).groupByKey(); // group by leaf id
+		} else {
+			throw new IllegalArgumentException("Invalid spatial index provided.");
+		}
+		
 	}
 	
 	// Reduce

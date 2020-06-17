@@ -3,6 +3,7 @@ package gr.ds.unipi.spades.util;
 import java.util.HashSet;
 import java.util.Set;
 
+import gr.ds.unipi.spades.geometry.Cell;
 import gr.ds.unipi.spades.geometry.Point;
 
 
@@ -28,14 +29,19 @@ public class MathUtils {
 		return new Point(x, y);	
     }
 	
-	// https://gist.github.com/vananth22/888ed9a22105670e7a4092bdcf0d72e4
+	
 	public static double haversineDistance(Point p1, Point p2) {		 
-		double latDistance = Math.toRadians(p2.getY()- p1.getY());
-		double lonDistance = Math.toRadians(p2.getX() - p1.getX());
-		double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) + 
-				Math.cos(Math.toRadians(p1.getY())) * Math.cos(Math.toRadians(p2.getY())) *
-				Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2);
-		double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+		return haversineDistance(p1.getX(), p2.getX(), p1.getY(), p2.getY());
+	}
+	
+	// https://gist.github.com/vananth22/888ed9a22105670e7a4092bdcf0d72e4
+	public static double haversineDistance(double x1, double x2, double y1, double y2) {	
+		double dy = Math.toRadians(y2 - y1);
+		double dx = Math.toRadians(x2 - x1);
+		double a = Math.sin(dy / 2) * Math.sin(dy / 2) + 
+				Math.cos(Math.toRadians(y1)) * Math.cos(Math.toRadians(y2)) *
+				Math.sin(dx / 2) * Math.sin(dx / 2);
+		double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 		double distance = EARTH_RADIUS * c;
 		
 		return distance;
@@ -58,5 +64,62 @@ public class MathUtils {
 	    s1.retainAll(s2);
 	    final int intersection = s1.size();
 	    return 1d / (sa + sb - intersection) * intersection;
+	}
+	
+	// 0            1             2
+	//   ------------------------
+	//   |						| 
+	// 7 |						| 3
+	//	 |						|
+	//	 ------------------------
+	// 6            5             4                
+	public static double pointToCellDistance(Point point, Cell cell) {
+		double dx = Math.max(cell.getMinX() - point.getX(), 0);
+		double dy = Math.max(cell.getMinY() - point.getY(), 0);
+		
+		if (dx > 0) {
+			// case 6
+			if (dy > 0) {
+				return haversineDistance(point.getY(), cell.getMinY(), point.getX(), cell.getMinX());
+			}
+			
+			dy = Math.max(dy, point.getY() - cell.getMaxY());
+			
+			// case 7
+			if (dy == 0) {
+				return haversineDistance(point.getY(), point.getY(), point.getX(), cell.getMinX());
+			}
+			
+			// case 0
+			return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), cell.getMinX());
+		} 
+		
+		dx = Math.max(dx, point.getX() - cell.getMaxX());
+		
+		if (dx == 0) {
+			// case 5
+			if (dy > 0) {
+				return haversineDistance(point.getY(), cell.getMinY(), point.getX(), point.getX());
+			}
+						
+			// case 1
+			return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), point.getX());
+		}
+		
+		// case 4
+		if (dy > 0) {
+			return haversineDistance(point.getY(), cell.getMinY(), point.getX(), cell.getMaxX());
+		}
+		
+		dy = Math.max(dy, point.getY() - cell.getMaxY());
+		
+		// case 3
+		if (dy == 0) {
+			return haversineDistance(point.getY(), point.getY(), point.getX(), cell.getMaxX());
+		}
+		
+		
+		// case 2
+		return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), cell.getMaxX());
 	}
 }
