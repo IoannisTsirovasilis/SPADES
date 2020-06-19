@@ -4,8 +4,8 @@ public class FeatureObject extends DataObject {
 	private double squareLowerX, squareLowerY, squareUpperX, squareUpperY;
 	private String[] keywords;
     
-    public FeatureObject(double x, double y, String[] keywords) {
-        super(x, y);
+    public FeatureObject(double x, double y, int tag, String[] keywords) {
+        super(x, y, tag);
         this.keywords = keywords;
     }  
     

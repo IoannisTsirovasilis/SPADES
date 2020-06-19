@@ -1,6 +1,7 @@
 package gr.ds.unipi.spades;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
@@ -87,12 +88,12 @@ public class SpatioTextualJoin {
         	if (tag == stj.file1Tag) {
         		longitude = Double.parseDouble(stj.extractWord(line, stj.file1LonIndex, stj.separator));
         		latitude = Double.parseDouble(stj.extractWord(line, stj.file1LatIndex, stj.separator));
-        		return new DataObject(longitude, latitude);
+        		return new DataObject(longitude, latitude, stj.file1Tag);
         	} else if (tag == stj.file2Tag) {
         		longitude = Double.parseDouble(stj.extractWord(line, stj.file2LonIndex, stj.separator));
         		latitude = Double.parseDouble(stj.extractWord(line, stj.file2LatIndex, stj.separator));
         		keywords = stj.extractWord(line, stj.file2KeywordsIndex, stj.separator).split(stj.file2KeywordsSeparator);
-        		return new FeatureObject(longitude, latitude, keywords);
+        		return new FeatureObject(longitude, latitude, stj.file2Tag, keywords);
         	} else {
         		throw new IllegalArgumentException();
         	}    	
@@ -126,7 +127,11 @@ public class SpatioTextualJoin {
 	            	// Assign point to every leaf that intersects with the square
 	            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
 	        	}       	
-	        }).groupByKey(); // group by leaf id
+	        }).groupByKey().mapValues(iter -> {
+	        	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+	        	pp.sort(new DataObject());
+	        	return pp;
+	        }); // group by leaf id and sort values based on tag
 		} else if (spatialIndex.getClass() == RegularGrid.class) {
 			return points.flatMapToPair(point -> {
 	        	// Get broadcasted values 
@@ -139,7 +144,11 @@ public class SpatioTextualJoin {
 	        		FeatureObject featureObject = (FeatureObject) point;
         			return grid.assignToCellAndDuplicate(featureObject, radius).iterator();	        		
 	        	}      	
-	        }).groupByKey(); // group by leaf id
+	        }).groupByKey().mapValues(iter -> {
+	        	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+	        	pp.sort(new DataObject());
+	        	return pp;
+	        });	// group by leaf id and sort values based on tag
 		} else {
 			throw new IllegalArgumentException("Invalid spatial index provided.");
 		}
@@ -158,7 +167,6 @@ public class SpatioTextualJoin {
         	// output is used to hold result point pairs 
         	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
         	
-        	// Naturally spark retains order of elements in an RDD. Data objects come first
         	for (Point point : pair._2) {
         		
         		// Load data objects
@@ -167,15 +175,14 @@ public class SpatioTextualJoin {
         			continue;
         		}
         		
-        		// If it reaches this line, then it processes feature objects 
-    			for (Point p : local) {
+        		for (Point p : local) {
     				FeatureObject featureObject = (FeatureObject) point;
     				// Check if it is within the provided distance AND is above the lower similarity threshold 
         			if (MathUtils.haversineDistance(p, featureObject) <= radius && MathUtils.jaccardSimilarity(keywords, featureObject.getKeywords()) >= similarityScore) {
         				output.add(new Tuple2<Point, Point>(p, featureObject));
         			}
         		}
-        	}
+        	}        	
         	
         	return output.iterator();
         });
