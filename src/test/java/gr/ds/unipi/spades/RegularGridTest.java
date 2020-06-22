@@ -1,14 +1,20 @@
 package gr.ds.unipi.spades;
 
 import gr.ds.unipi.spades.regularGrid.RegularGrid;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+
 import gr.ds.unipi.spades.geometry.Cell;
 import gr.ds.unipi.spades.geometry.Point;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
+import scala.Tuple2;
 
-public class RegularGridTest extends TestCase
+public class RegularGridTest extends TestCase implements Comparator<Tuple2<Integer, Point>>
 {
+	public RegularGridTest() {}
     /**
      * Create the test case
      *
@@ -25,6 +31,22 @@ public class RegularGridTest extends TestCase
     public static Test suite()
     {
         return new TestSuite( RegularGridTest.class );
+    }
+    
+    double radius, minX, minY, maxX, maxY;
+    int hSectors, vSectors;
+    RegularGrid grid;
+    
+    public void setUp() {
+    	radius = 15.72;
+		minX = 0;
+		minY = 0;
+		maxX = 1;
+		maxY = 1;
+		hSectors = 3;
+		vSectors = 3;
+		
+		grid = new RegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
     }
     
     public void testBuildGridCreatesProperGrid() {
@@ -63,4 +85,243 @@ public class RegularGridTest extends TestCase
     		}
     	}
     }
+    
+    // Tests on 3x3 Grid    
+    //  -------------------------------------------------------------
+    //  |					|					|					|   
+    //  |    	6			|		7			|		8			|					
+    //  |					|					|					|
+    //  -------------------------------------------------------------
+    //  |					|					|					|   
+    //  |    	3			|		4			|		5			|					
+    //  |					|					|					|
+    //  -------------------------------------------------------------
+    //  |					|					|					|   
+    //  |    	0			|		1			|		2			|					
+    //  |					|					|					|
+    //  -------------------------------------------------------------
+    // The numbers represent the cell id. 
+    // Cell[3][3] array is translated as follows:
+    // [0][0] --> 0
+    // [0][1] --> 1
+    // [0][2] --> 2
+    // [1][0] --> 3
+    // ............
+    // [2][1] --> 7
+    // [2][2] --> 8
+    
+    
+    public void testEdgeCaseRightBound() {    		
+    	Point point = new Point(1, 0.15);
+		
+		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(2, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    // Naming convention for the following methods:
+    // testEdgeCase + <cell_id> + <position of point in cell with cell id "cell_id">
+    // e.g testEdgeCase0UpperRight ---> test for a point that lies in cell with id 0 and 
+    // is positioned near to the upper right corner of the cell.
+    
+    public void testEdgeCase0UpperRight() {    	
+    	Point point = new Point(0.31, 0.31);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(0, point));
+		actualResults.add(new Tuple2<Integer, Point>(1, point));
+		actualResults.add(new Tuple2<Integer, Point>(3, point));
+		actualResults.add(new Tuple2<Integer, Point>(4, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    
+    
+    public void testEdgeCase0Top() {
+    	Point point = new Point(0.15, 0.31);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(0, point));
+		actualResults.add(new Tuple2<Integer, Point>(3, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase0Right() {
+    	Point point = new Point(0.31, 0.15);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(0, point));
+		actualResults.add(new Tuple2<Integer, Point>(1, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase2UpperLeft() {
+    	Point point = new Point(0.68, 0.31);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(1, point));
+		actualResults.add(new Tuple2<Integer, Point>(2, point));
+		actualResults.add(new Tuple2<Integer, Point>(4, point));
+		actualResults.add(new Tuple2<Integer, Point>(5, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase2Top() {    	
+    	Point point = new Point(0.9, 0.31);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(2, point));
+		actualResults.add(new Tuple2<Integer, Point>(5, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase2Left() {  
+    	Point point = new Point(0.7, 0.15);		
+
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(1, point));
+		actualResults.add(new Tuple2<Integer, Point>(2, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase6Right() {    	
+    	Point point = new Point(0.31, 0.9);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(6, point));
+		actualResults.add(new Tuple2<Integer, Point>(7, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase6Bottom() {    	
+    	Point point = new Point(0.15, 0.68);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(3, point));
+		actualResults.add(new Tuple2<Integer, Point>(6, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase6BottomRight() {
+    	Point point = new Point(0.31, 0.68);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(3, point));
+		actualResults.add(new Tuple2<Integer, Point>(4, point));
+		actualResults.add(new Tuple2<Integer, Point>(6, point));
+		actualResults.add(new Tuple2<Integer, Point>(7, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase8Bottom() {    	
+    	Point point = new Point(0.9, 0.68);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();
+		actualResults.add(new Tuple2<Integer, Point>(5, point));
+		actualResults.add(new Tuple2<Integer, Point>(8, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase8Left() {
+    	Point point = new Point(0.68, 0.9);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();		
+		actualResults.add(new Tuple2<Integer, Point>(7, point));
+		actualResults.add(new Tuple2<Integer, Point>(8, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+    
+    public void testEdgeCase8BottomLeft() {    	
+    	Point point = new Point(0.68, 0.68);		
+    	
+    	ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+		result.sort(new RegularGridTest());
+		ArrayList<Tuple2<Integer, Point>> actualResults = new ArrayList<Tuple2<Integer, Point>>();	
+		actualResults.add(new Tuple2<Integer, Point>(4, point));
+		actualResults.add(new Tuple2<Integer, Point>(5, point));
+		actualResults.add(new Tuple2<Integer, Point>(7, point));
+		actualResults.add(new Tuple2<Integer, Point>(8, point));
+		
+		assertEquals(actualResults.size(), result.size());
+		for (int i = 0; i < actualResults.size(); i++) {
+			assertEquals(actualResults.get(i)._1.intValue(), result.get(i)._1.intValue());
+		}
+    }
+
+	@Override
+	public int compare(Tuple2<Integer, Point> pair1, Tuple2<Integer, Point> pair2) {
+		return pair1._1.intValue() - pair2._1.intValue(); 
+	}
 }
