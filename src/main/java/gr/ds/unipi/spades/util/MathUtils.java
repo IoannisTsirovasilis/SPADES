@@ -80,18 +80,18 @@ public class MathUtils {
 		if (dx > 0) {
 			// case 6
 			if (dy > 0) {
-				return haversineDistance(point.getY(), cell.getMinY(), point.getX(), cell.getMinX());
+				return haversineDistance(point.getX(), cell.getMinX(), point.getY(), cell.getMinY());
 			}
 			
 			dy = Math.max(dy, point.getY() - cell.getMaxY());
 			
 			// case 7
 			if (dy == 0) {
-				return haversineDistance(point.getY(), point.getY(), point.getX(), cell.getMinX());
+				return haversineDistance(point.getX(), cell.getMinX(), point.getY(), point.getY());
 			}
 			
 			// case 0
-			return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), cell.getMinX());
+			return haversineDistance(point.getX(), cell.getMinX(), point.getY(), cell.getMaxY());
 		} 
 		
 		dx = Math.max(dx, point.getX() - cell.getMaxX());
@@ -99,27 +99,27 @@ public class MathUtils {
 		if (dx == 0) {
 			// case 5
 			if (dy > 0) {
-				return haversineDistance(point.getY(), cell.getMinY(), point.getX(), point.getX());
+				return haversineDistance(point.getX(), point.getX(), point.getY(), cell.getMinY());
 			}
 						
 			// case 1
-			return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), point.getX());
+			return haversineDistance(point.getX(), point.getX(), point.getY(), cell.getMaxY());
 		}
 		
 		// case 4
 		if (dy > 0) {
-			return haversineDistance(point.getY(), cell.getMinY(), point.getX(), cell.getMaxX());
+			return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), cell.getMinY());
 		}
 		
 		dy = Math.max(dy, point.getY() - cell.getMaxY());
 		
 		// case 3
 		if (dy == 0) {
-			return haversineDistance(point.getY(), point.getY(), point.getX(), cell.getMaxX());
+			return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), point.getY());
 		}
 		
 		
 		// case 2
-		return haversineDistance(point.getY(), cell.getMaxY(), point.getX(), cell.getMaxX());
+		return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), cell.getMaxY());
 	}
 }
