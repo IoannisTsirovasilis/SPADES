@@ -29,6 +29,10 @@ public class MathUtils {
 		return new Point(x, y);	
     }
 	
+	public static double getXInDistanceOnEquator(double x, double distance) {
+		return getPointInDistanceAndBearing(new Point(x, 0), distance, 90).getX();
+	}
+	
 	
 	public static double haversineDistance(Point p1, Point p2) {		 
 		return haversineDistance(p1.getX(), p2.getX(), p1.getY(), p2.getY());

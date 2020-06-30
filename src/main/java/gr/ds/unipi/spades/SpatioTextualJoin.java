@@ -16,10 +16,16 @@ import gr.ds.unipi.spades.geometry.Point;
 import gr.ds.unipi.spades.quadTree.QuadTree;
 import gr.ds.unipi.spades.regularGrid.RegularGrid;
 import gr.ds.unipi.spades.util.MathUtils;
+import gr.ds.unipi.spades.util.Points;
 import scala.Tuple2;
 
 public class SpatioTextualJoin {
 	public JavaRDD<Tuple2<Point, Point>> resultPairs;
+	
+	private int jaccardCount;
+	private int haversineCount;
+	private int pairsCount;
+	
 	// File 1 Fields (Data Objects)
 	private int file1LonIndex, file1LatIndex, file1Tag;
 	
@@ -51,6 +57,24 @@ public class SpatioTextualJoin {
 		this.file2KeywordsSeparator = file2KeywordsSeparator;
 		this.separator = separator;
 		this.tagIndex = tagIndex;
+	}
+	
+	public int getJaccardCount() {
+		return jaccardCount;
+	}
+	
+	public int getHaversineCount() {
+		return haversineCount;
+	}
+	
+	public int getPairsCount() {
+		return pairsCount;
+	}
+	
+	public void resetCounts() {
+		jaccardCount = 0;
+		haversineCount = 0;
+		pairsCount = 0;
 	}
 	
 	// Create Global Index Quad Tree
@@ -136,14 +160,8 @@ public class SpatioTextualJoin {
 			return points.flatMapToPair(point -> {
 	        	// Get broadcasted values 
 	        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
-	        	
-	        	if (point.getClass() == DataObject.class) {
-	        		DataObject dataObject = (DataObject) point;
-	        		return grid.assignToCellIterator(dataObject).iterator();
-	        	} else {
-	        		FeatureObject featureObject = (FeatureObject) point;
-        			return grid.assignToCellAndDuplicate(featureObject, radius).iterator();	        		
-	        	}      	
+	        	return point.getClass() == DataObject.class ? grid.assignToCellIterator(point).iterator() : 
+	        		grid.assignToCellAndDuplicate(point, radius).iterator(); 	
 	        }).groupByKey().mapValues(iter -> {
 	        	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
 	        	pp.sort(new DataObject());
@@ -154,12 +172,13 @@ public class SpatioTextualJoin {
 		}
 		
 	}
-	
+		
 	// Reduce
     // Produce result set (pairs of interest)
 	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, Iterable<Point>> pairs,
-			double radius, double similarityScore, String[] keywords) {        		
+			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) {        		
         resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	SpatioTextualJoin stj = broadcastStj.getValue();
         	
         	// Array list to retain data objects in memory
         	ArrayList<Point> local = new ArrayList<Point>();
@@ -178,11 +197,108 @@ public class SpatioTextualJoin {
         		for (Point p : local) {
     				FeatureObject featureObject = (FeatureObject) point;
     				// Check if it is within the provided distance AND is above the lower similarity threshold 
-        			if (MathUtils.haversineDistance(p, featureObject) <= radius && MathUtils.jaccardSimilarity(keywords, featureObject.getKeywords()) >= similarityScore) {
-        				output.add(new Tuple2<Point, Point>(p, featureObject));
+    				stj.haversineCount++;
+        			if (MathUtils.haversineDistance(p, featureObject) <= radius) {
+        				stj.jaccardCount++;
+    					if (MathUtils.jaccardSimilarity(keywords, featureObject.getKeywords()) >= similarityScore) {
+    						stj.pairsCount++;
+							output.add(new Tuple2<Point, Point>(p, featureObject));
+    					}
         			}
         		}
         	}        	
+        	
+        	return output.iterator();
+        });
+        
+        return resultPairs;
+	}
+	
+	// Reduce
+    // Produce result set (pairs of interest)
+	public JavaRDD<Tuple2<Point, Point>> reduceJaccardCount(JavaPairRDD<Integer, Iterable<Point>> pairs,
+			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) {        		
+        resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	SpatioTextualJoin stj = broadcastStj.getValue();
+        	
+        	// Array list to retain data objects in memory
+        	ArrayList<Point> local = new ArrayList<Point>();
+        	
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
+        	for (Point point : pair._2) {
+        		
+        		// Load data objects
+        		if (point.getClass() == DataObject.class) { 
+        			local.add(point);
+        			continue;
+        		}
+        		
+        		for (Point p : local) {
+    				FeatureObject featureObject = (FeatureObject) point;
+    				// Check if it is within the provided distance AND is above the lower similarity threshold 
+    				stj.jaccardCount++;
+        			if (MathUtils.jaccardSimilarity(keywords, featureObject.getKeywords()) >= similarityScore) {
+        				stj.haversineCount++;
+    					if (MathUtils.haversineDistance(p, featureObject) <= radius) {
+    						stj.pairsCount++;
+							output.add(new Tuple2<Point, Point>(p, featureObject));
+    					}
+        			}
+        		}
+        	}        	
+        	
+        	return output.iterator();
+        });
+        
+        return resultPairs;
+	}
+	
+	// Reduce
+    // Produce result set (pairs of interest)
+	public JavaRDD<Tuple2<Point, Point>> reduceWithPlaneSweep(JavaPairRDD<Integer, Iterable<Point>> pairs,
+			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) { 
+        resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	SpatioTextualJoin stj = broadcastStj.getValue();
+        	int size = 0;
+        	for (Point p : pair._2) {
+        		size++;
+        	}
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
+        	Point[] objects = new Point[size];
+        	int counter = 0;
+        	for (Point point : pair._2) {
+        		objects[counter++] = point;
+        	}      
+        	assert counter == size;
+        	Points.sort(objects, Point.XComparator);
+        	int currentTag = 0;
+        	Point end = new Point();
+        	for (int i = 0; i < objects.length - 1; i++) {
+        		currentTag = ((DataObject) objects[i]).getTag();
+        		end.setX(MathUtils.getXInDistanceOnEquator(objects[i].getX(), radius));
+        		
+        		int j = i + 1;
+        		while (objects[j].getX() <= end.getX()) {
+        			if (((DataObject) objects[j]).getTag() != currentTag) {
+        				if (MathUtils.haversineDistance(objects[i], objects[j]) <= radius) {
+        					FeatureObject fo = objects[i].getClass() == DataObject.class ? (FeatureObject) objects[j] : (FeatureObject) objects[i];
+        					
+        					if (MathUtils.jaccardSimilarity(fo.getKeywords(), keywords) >= similarityScore) {
+        						output.add(new Tuple2<Point, Point>(objects[j], objects[i]));
+        					}
+        				}
+        			}
+        			
+        			j++;
+        			
+        			if (j == objects.length) break;
+        		}
+        		
+        	}
         	
         	return output.iterator();
         });
