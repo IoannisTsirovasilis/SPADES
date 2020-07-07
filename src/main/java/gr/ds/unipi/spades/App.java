@@ -56,8 +56,8 @@ public class App
     	String localFilePath;
     	if (args.length == 0) {
     		FILE_PATH = "C:/Users/user/OneDrive/Documents/SPADES Project/Datasets/";
-        	file1 = "s_100k.txt";
-        	file2 = "sw_100k.txt";
+        	file1 = "u_1M.txt";
+        	file2 = "uw_1M.txt";
         	localFilePath = "C:/Users/user/OneDrive/Documents/SPADES Project/Datasets/";
     	} else {
     		FILE_PATH = args[0];
@@ -81,13 +81,13 @@ public class App
     	JavaRDD<Point> points = stj.mapToPoints(file, broadcastStj);
     	
     	// Quad tree and query parameters
-    	double minX = -4;
-    	double minY = -6;
-    	double maxX = 4;
-    	double maxY = 4;
-    	int inputSize = 100_000;
+    	double minX = 0;
+    	double minY = 0;
+    	double maxX = 10;
+    	double maxY = 10;
+    	int inputSize = 1_000_000;
     	int samplePointsPerLeaf = 1;
-    	double samplePercentage = 0.1;
+    	double samplePercentage = 0.01;
     	int hSectors = 100;
     	int vSectors = 100;    	
     	double similarityScore = 0.5;    	 
@@ -96,7 +96,7 @@ public class App
     	String dist = "Clustered";
     	String[] keywords;
     	
-    	FileWriter csvWriter = new FileWriter(localFilePath + "experiments.csv");
+    	FileWriter csvWriter = new FileWriter(localFilePath + "experiments__.csv");
     	addLabels(csvWriter);
     	
     	int assertionErrors = 0;
@@ -129,7 +129,7 @@ public class App
             	// Broadcast quad tree
             	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
             	
-            	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius);
+            	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius, keywords);
             	JavaRDD<Tuple2<Point, Point>> out = stj.reduceJaccardCount(groupedPairs, radius, similarityScore , keywords, broadcastStj);
             	
             	startTime = System.nanoTime();
@@ -144,7 +144,7 @@ public class App
             	
             	broadcastStj.getValue().resetCounts();
             	
-            	 groupedPairs = stj.mapPlaneSweep(points, broadcastQuadTree, radius);
+            	 groupedPairs = stj.mapPlaneSweep(points, broadcastQuadTree, radius, keywords);
             	 out = stj.reduceWithPlaneSweep(groupedPairs, radius, similarityScore , keywords, broadcastStj);
             	
             	startTime = System.nanoTime();

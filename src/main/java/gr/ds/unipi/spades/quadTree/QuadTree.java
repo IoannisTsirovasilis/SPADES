@@ -71,6 +71,12 @@ public class QuadTree {
         }
     }
     
+    public static ArrayList<Tuple2<Integer, Point>> empty() {
+    	ArrayList<Tuple2<Integer, Point>> empty = new ArrayList<Tuple2<Integer, Point>>();
+    	empty.add(new Tuple2<Integer, Point>(-1, null));
+    	return empty;
+    }
+    
     // Recursive method for assigning a point to a leaf and 
     // to all the leaves that intersect with the square around the point
     public ArrayList<Tuple2<Integer, Point>> assignToLeafNodeAndDuplicate(Node node, FeatureObject featureObject) {

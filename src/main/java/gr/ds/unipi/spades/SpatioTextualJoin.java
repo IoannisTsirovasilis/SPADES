@@ -127,7 +127,8 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, double radius) {
+	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+			double radius, String[] keywords) {
 		Object spatialIndex = broadcastSpatialIndex.getValue();
 		if (spatialIndex.getClass() == QuadTree.class) {
 			return points.flatMapToPair(point -> {
@@ -139,7 +140,9 @@ public class SpatioTextualJoin {
 	        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
 	        	} else {
 	        		FeatureObject featureObject = (FeatureObject) point;
-	        		// else construct square around point with size length "radius" and center "point"   
+	        		
+	        		if (!featureObject.hasCommonKeywords(keywords)) return QuadTree.empty().iterator(); 
+    				// else construct square around point with size length "radius" and center "point"   
 	            	// 0, 90, 180, 270 represents navigation bearing
 	            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
 	            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
@@ -174,7 +177,8 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-		public JavaPairRDD<Integer, Iterable<Point>> mapPlaneSweep(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, double radius) {
+		public JavaPairRDD<Integer, Iterable<Point>> mapPlaneSweep(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+				double radius, String[] keywords) {
 			Object spatialIndex = broadcastSpatialIndex.getValue();
 			if (spatialIndex.getClass() == QuadTree.class) {
 				return points.flatMapToPair(point -> {
@@ -186,6 +190,8 @@ public class SpatioTextualJoin {
 		        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
 		        	} else {
 		        		FeatureObject featureObject = (FeatureObject) point;
+		        		
+		        		if (!featureObject.hasCommonKeywords(keywords)) return QuadTree.empty().iterator();
 		        		// else construct square around point with size length "radius" and center "point"   
 		            	// 0, 90, 180, 270 represents navigation bearing
 		            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
@@ -217,16 +223,20 @@ public class SpatioTextualJoin {
 	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, Iterable<Point>> pairs,
 			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) {        		
         resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
+        	if (pair._1.intValue() == -1) return output.iterator();
+        	
         	SpatioTextualJoin stj = broadcastStj.getValue();
         	
         	// Array list to retain data objects in memory
         	ArrayList<Point> local = new ArrayList<Point>();
         	
-        	// output is used to hold result point pairs 
-        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
         	
         	for (Point point : pair._2) {
-        		
         		// Load data objects
         		if (point.getClass() == DataObject.class) { 
         			local.add(point);
@@ -258,13 +268,15 @@ public class SpatioTextualJoin {
 	public JavaRDD<Tuple2<Point, Point>> reduceJaccardCount(JavaPairRDD<Integer, Iterable<Point>> pairs,
 			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) {        		
         resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
+        	if (pair._1.intValue() == -1) return output.iterator();
         	SpatioTextualJoin stj = broadcastStj.getValue();
         	
         	// Array list to retain data objects in memory
         	ArrayList<Point> local = new ArrayList<Point>();
-        	
-        	// output is used to hold result point pairs 
-        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
         	
         	for (Point point : pair._2) {
         		
@@ -299,13 +311,15 @@ public class SpatioTextualJoin {
 	public JavaRDD<Tuple2<Point, Point>> reduceWithPlaneSweep(JavaPairRDD<Integer, Iterable<Point>> pairs,
 			double radius, double similarityScore, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) { 
         resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
+        	
+        	if (pair._1.intValue() == -1) return output.iterator();
         	SpatioTextualJoin stj = broadcastStj.getValue();
         	int size = 0;
         	for (Point p : pair._2) {
         		size++;
         	}
-        	// output is used to hold result point pairs 
-        	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>(); 
         	
         	Point[] objects = new Point[size];
         	int counter = 0;

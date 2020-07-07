@@ -1,5 +1,8 @@
 package gr.ds.unipi.spades.geometry;
 
+import java.util.Arrays;
+import java.util.Collections;
+
 public class FeatureObject extends DataObject {
 	private double squareLowerX, squareLowerY, squareUpperX, squareUpperY;
 	private String[] keywords;
@@ -34,6 +37,10 @@ public class FeatureObject extends DataObject {
     
     public double getSquareUpperY() {
     	return squareUpperY;
+    }
+    
+    public boolean hasCommonKeywords(String[] keywords) {
+    	return !Collections.disjoint(Arrays.asList(this.keywords), Arrays.asList(keywords));
     }
     
     @Override

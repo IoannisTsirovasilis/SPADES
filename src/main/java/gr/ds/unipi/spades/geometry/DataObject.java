@@ -18,6 +18,8 @@ public class DataObject extends Point implements Comparator<Point> {
 
 	@Override
 	public int compare(Point point1, Point point2) {
+		if (point1 == null) return -1;
+		if (point2 == null) return 1;
 		if (point1 instanceof DataObject && point2 instanceof DataObject) {
 			return ((DataObject) point1).getTag() - ((DataObject) point2).getTag();
 		}

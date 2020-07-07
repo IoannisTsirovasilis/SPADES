@@ -1,6 +1,7 @@
 package gr.ds.unipi.spades;
 
 import java.io.IOException;
+import java.util.ArrayList;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -12,6 +13,7 @@ import gr.ds.unipi.spades.geometry.Point;
 import gr.ds.unipi.spades.quadTree.Node;
 import gr.ds.unipi.spades.quadTree.QuadTree;
 import gr.ds.unipi.spades.util.MathUtils;
+import javassist.bytecode.Descriptor.Iterator;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
@@ -56,7 +58,7 @@ public class SpatioTextualJoinTest extends TestCase
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
     	double radius = 400;
-    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius);
+    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius, new String[] {"italian"});
     	JavaRDD<Tuple2<Point, Point>> out = stj.reduce(groupedPairs, radius, 0.5 , new String[] {"italian"}, broadcastStj);
     	System.out.println(out.count());
     	for ( Tuple2<Point, Point> pp : out.collect()) {
@@ -84,7 +86,7 @@ public class SpatioTextualJoinTest extends TestCase
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
     	double radius = 400;
-    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius);
+    	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius, new String[] {"italian"});
     	JavaRDD<Tuple2<Point, Point>> out = stj.reduceWithPlaneSweep(groupedPairs, radius, 0.5 , new String[] {"italian"}, broadcastStj);
     	System.out.println(out.count());
     	for ( Tuple2<Point, Point> pp : out.collect()) {
