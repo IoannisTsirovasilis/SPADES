@@ -172,6 +172,45 @@ public class SpatioTextualJoin {
 		}
 		
 	}
+	
+	// Map to pairs
+		public JavaPairRDD<Integer, Iterable<Point>> mapPlaneSweep(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, double radius) {
+			Object spatialIndex = broadcastSpatialIndex.getValue();
+			if (spatialIndex.getClass() == QuadTree.class) {
+				return points.flatMapToPair(point -> {
+		        	// Get broadcasted values 
+		        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
+		        	
+		        	if (point.getClass() == DataObject.class) {
+		        		DataObject dataObject = (DataObject) point;
+		        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
+		        	} else {
+		        		FeatureObject featureObject = (FeatureObject) point;
+		        		// else construct square around point with size length "radius" and center "point"   
+		            	// 0, 90, 180, 270 represents navigation bearing
+		            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
+		            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
+		            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
+		            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
+		            	
+		            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+		            	
+		            	// Assign point to every leaf that intersects with the square
+		            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
+		        	}       	
+		        }).groupByKey();
+			} else if (spatialIndex.getClass() == RegularGrid.class) {
+				return points.flatMapToPair(point -> {
+		        	// Get broadcasted values 
+		        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
+		        	return point.getClass() == DataObject.class ? grid.assignToCellIterator(point).iterator() : 
+		        		grid.assignToCellAndDuplicate(point, radius).iterator(); 	
+		        }).groupByKey();
+			} else {
+				throw new IllegalArgumentException("Invalid spatial index provided.");
+			}
+			
+		}
 		
 	// Reduce
     // Produce result set (pairs of interest)
@@ -273,21 +312,22 @@ public class SpatioTextualJoin {
         	for (Point point : pair._2) {
         		objects[counter++] = point;
         	}      
-        	assert counter == size;
         	Points.sort(objects, Point.XComparator);
         	int currentTag = 0;
         	Point end = new Point();
         	for (int i = 0; i < objects.length - 1; i++) {
         		currentTag = ((DataObject) objects[i]).getTag();
-        		end.setX(MathUtils.getXInDistanceOnEquator(objects[i].getX(), radius));
+        		end.setX(MathUtils.getXInDistanceOnEquator(objects[i].getX(), radius) + 0.1);
         		
         		int j = i + 1;
         		while (objects[j].getX() <= end.getX()) {
         			if (((DataObject) objects[j]).getTag() != currentTag) {
-        				if (MathUtils.haversineDistance(objects[i], objects[j]) <= radius) {
-        					FeatureObject fo = objects[i].getClass() == DataObject.class ? (FeatureObject) objects[j] : (FeatureObject) objects[i];
-        					
-        					if (MathUtils.jaccardSimilarity(fo.getKeywords(), keywords) >= similarityScore) {
+        				FeatureObject fo = objects[i].getClass() == DataObject.class ? (FeatureObject) objects[j] : (FeatureObject) objects[i];
+        				stj.jaccardCount++;
+        				if (MathUtils.jaccardSimilarity(fo.getKeywords(), keywords) >= similarityScore) {      					
+        					stj.haversineCount++;
+        					if (MathUtils.haversineDistance(objects[i], objects[j]) <= radius) {
+        						stj.pairsCount++;
         						output.add(new Tuple2<Point, Point>(objects[j], objects[i]));
         					}
         				}

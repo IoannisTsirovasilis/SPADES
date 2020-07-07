@@ -1,5 +1,7 @@
 package gr.ds.unipi.spades.util;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 
 import gr.ds.unipi.spades.geometry.Point;
@@ -28,7 +30,8 @@ class TimSort {
     /**
      * The array being sorted.
      */
-    private final Point[] a;
+    private Point[] a;
+    private ArrayList<Point> a_;
     
     /**
      * When we get into galloping mode, we stay there until both runs win less
@@ -62,6 +65,7 @@ class TimSort {
      * Temp storage for merges.
      */
     private Point[] tmp; // Actual runtime type will be Object[], regardless of T
+    private ArrayList<Point> tmp_;
     
     /**
      * A stack of pending runs yet to be merged.  Run i starts at
@@ -111,8 +115,90 @@ class TimSort {
         runLen = new int[stackLen];
     }
     
+    private TimSort(ArrayList<Point> a, Comparator<? super Point> c) {
+        this.a_ = a;
+        this.c = c;
+
+        // Allocate temp storage (which may be increased later if necessary)
+        int len = a.size();
+        int newSize = len < 2 * INITIAL_TMP_STORAGE_LENGTH ?
+                len >>> 1 : INITIAL_TMP_STORAGE_LENGTH;
+        @SuppressWarnings({"unchecked", "UnnecessaryLocalVariable"})
+        ArrayList<Point> newArray = new ArrayList<Point>(newSize);
+        for (int i = 0; i < newSize; i++) {
+        	newArray.add(null);
+        }
+        tmp_ = newArray;
+
+        /*
+         * Allocate runs-to-be-merged stack (which cannot be expanded).  The
+         * stack length requirements are described in listsort.txt.  The C
+         * version always uses the same stack length (85), but this was
+         * measured to be too expensive when sorting "mid-sized" arrays (e.g.,
+         * 100 elements) in Java.  Therefore, we use smaller (but sufficiently
+         * large) stack lengths for smaller arrays.  The "magic numbers" in the
+         * computation below must be changed if MIN_MERGE is decreased.  See
+         * the MIN_MERGE declaration above for more information.
+         */
+        int stackLen = (len <    120  ?  5 :
+                        len <   1542  ? 10 :
+                        len < 119151  ? 19 : 40);
+        runBase = new int[stackLen];
+        runLen = new int[stackLen];
+    }
+    
     static void sort(Point[] a, Comparator<? super Point> c) {
         sort(a, 0, a.length, c);
+    }
+    
+    static void sort(ArrayList<Point> a, Comparator<? super Point> c) {
+        sort(a, 0, a.size(), c);
+    }
+    
+    static void sort(ArrayList<Point> a, int lo, int hi, Comparator<? super Point> c) {
+        rangeCheck(a.size(), lo, hi);
+        int nRemaining  = hi - lo;
+        if (nRemaining < 2)
+            return;  // Arrays of size 0 and 1 are always sorted
+
+        // If array is small, do a "mini-TimSort" with no merges
+        if (nRemaining < MIN_MERGE) {
+            int initRunLen = countRunAndMakeAscending(a, lo, hi, c);
+            binarySort(a, lo, hi, lo + initRunLen, c);
+            return;
+        }
+
+        /**
+         * March over the array once, left to right, finding natural runs,
+         * extending short natural runs to minRun elements, and merging runs
+         * to maintain stack invariant.
+         */
+        TimSort ts = new TimSort(a, c);
+        int minRun = minRunLength(nRemaining);
+        do {
+            // Identify next run
+            int runLen = countRunAndMakeAscending(a, lo, hi, c);
+
+            // If run is short, extend to min(minRun, nRemaining)
+            if (runLen < minRun) {
+                int force = nRemaining <= minRun ? nRemaining : minRun;
+                binarySort(a, lo, lo + force, lo + runLen, c);
+                runLen = force;
+            }
+
+            // Push run onto pending-run stack, and maybe merge
+            ts.pushRun(lo, runLen);
+            ts.mergeCollapse();
+
+            // Advance to find next run
+            lo += runLen;
+            nRemaining -= runLen;
+        } while (nRemaining != 0);
+
+        // Merge all remaining runs to complete sort
+        assert lo == hi;
+        ts.mergeForceCollapse();
+        assert ts.stackSize == 1;
     }
 	
 	static void sort(Point[] a, int lo, int hi, Comparator<? super Point> c) {
@@ -226,6 +312,53 @@ class TimSort {
         }
     }
     
+    @SuppressWarnings("fallthrough")
+    private static void binarySort(ArrayList<Point> a, int lo, int hi, int start,
+                                       Comparator<? super Point> c) {
+        assert lo <= start && start <= hi;
+        if (start == lo)
+            start++;
+        for ( ; start < hi; start++) {
+            Point pivot = a.get(start);
+            // Set left (and right) to the index where a[start] (pivot) belongs
+            int left = lo;
+            int right = start;
+            assert left <= right;
+            /*
+             * Invariants:
+             *   pivot >= all in [lo, left).
+             *   pivot <  all in [right, start).
+             */
+            while (left < right) {
+                int mid = (left + right) >>> 1;
+                if (c.compare(pivot, a.get(mid)) < 0)
+                    right = mid;
+                else
+                    left = mid + 1;
+            }
+            assert left == right;
+
+            /*
+             * The invariants still hold: pivot >= all in [lo, left) and
+             * pivot < all in [left, start), so pivot belongs at left.  Note
+             * that if there are elements equal to pivot, left points to the
+             * first slot after them -- that's why this sort is stable.
+             * Slide elements over to make room for pivot.
+             */
+            int n = start - left;  // The number of elements to move
+            // Switch is just an optimization for arraycopy in default case
+            switch (n) {
+                case 2:      
+                	a.set(left + 2, a.get(left + 1));
+                case 1:
+                	a.set(left + 1, a.get(left));
+                	break;                
+                default: pointArrayCopy(a, left, a, left + 1, n);
+            }
+            a.set(left, pivot);
+        }
+    }
+    
     /**
      * Checks that fromIndex and toIndex are in range, and throws an
      * appropriate exception if they aren't.
@@ -292,6 +425,26 @@ class TimSort {
         return runHi - lo;
     }
     
+    private static int countRunAndMakeAscending(ArrayList<Point> a, int lo, int hi,
+            Comparator<? super Point> c) {
+		assert lo < hi;
+		int runHi = lo + 1;
+		if (runHi == hi)
+		return 1;
+		
+		// Find end of run, and reverse range if descending
+		if (c.compare(a.get(runHi++), a.get(lo)) < 0) { // Descending
+			while (runHi < hi && c.compare(a.get(runHi), a.get(runHi - 1)) < 0)
+				runHi++;
+			reverseRange(a, lo, runHi);
+		} else {                              // Ascending
+			while (runHi < hi && c.compare(a.get(runHi), a.get(runHi - 1)) >= 0)
+				runHi++;
+		}
+		
+		return runHi - lo;
+	}
+    
     /**
      * Reverse the specified range of the specified array.
      *
@@ -306,6 +459,17 @@ class TimSort {
             a[lo] = a[hi];
             lo++;
             a[hi] = t;
+            hi--;
+        }
+    }
+    
+    private static void reverseRange(ArrayList<Point> a, int lo, int hi) {
+        hi--;
+        while (lo < hi) {
+            Point t = a.get(lo);
+            a.set(lo, a.get(hi));
+            lo++;
+            a.set(hi, t);
             hi--;
         }
     }
@@ -423,7 +587,12 @@ class TimSort {
          * Find where the first element of run2 goes in run1. Prior elements
          * in run1 can be ignored (because they're already in place).
          */
-        int k = gallopRight(a[base2], a, base1, len1, 0, c);
+        int k = 0;
+        if (a == null) {
+        	k = gallopRight(a_.get(base2), a_, base1, len1, 0, c);
+        } else {
+        	k = gallopRight(a[base2], a, base1, len1, 0, c);
+        }
         assert k >= 0;
         base1 += k;
         len1 -= k;
@@ -434,7 +603,12 @@ class TimSort {
          * Find where the last element of run1 goes in run2. Subsequent elements
          * in run2 can be ignored (because they're already in place).
          */
-        len2 = gallopLeft(a[base1 + len1 - 1], a, base2, len2, len2 - 1, c);
+        if (a == null) {
+        	len2 = gallopLeft(a_.get(base1 + len1 - 1), a_, base2, len2, len2 - 1, c);
+        } else {
+        	len2 = gallopLeft(a[base1 + len1 - 1], a, base2, len2, len2 - 1, c);
+        }
+        
         assert len2 >= 0;
         if (len2 == 0)
             return;
@@ -520,7 +694,65 @@ class TimSort {
         assert lastOfs == ofs;    // so a[base + ofs - 1] < key <= a[base + ofs]
         return ofs;
     }
+    
+    private static int gallopLeft(Point key, ArrayList<Point> a, int base, int len, int hint,
+            Comparator<? super Point> c) {
+		assert len > 0 && hint >= 0 && hint < len;
+		int lastOfs = 0;
+		int ofs = 1;
+		if (c.compare(key, a.get(base + hint)) > 0) {
+			// Gallop right until a[base+hint+lastOfs] < key <= a[base+hint+ofs]
+			int maxOfs = len - hint;
+			while (ofs < maxOfs && c.compare(key, a.get(base + hint + ofs)) > 0) {
+				lastOfs = ofs;
+					ofs = (ofs << 1) + 1;
+				if (ofs <= 0)   // int overflow
+					ofs = maxOfs;
+			}
+			if (ofs > maxOfs)
+				ofs = maxOfs;
+			
+			// Make offsets relative to base
+			lastOfs += hint;
+			ofs += hint;
+		} else { // key <= a[base + hint]
+			// Gallop left until a[base+hint-ofs] < key <= a[base+hint-lastOfs]
+			final int maxOfs = hint + 1;
+			while (ofs < maxOfs && c.compare(key, a.get(base + hint - ofs)) <= 0) {
+				lastOfs = ofs;
+					ofs = (ofs << 1) + 1;
+				if (ofs <= 0)   // int overflow
+					ofs = maxOfs;
+			}
+			if (ofs > maxOfs)
+				ofs = maxOfs;
+			
+			// Make offsets relative to base
+			int tmp = lastOfs;
+			lastOfs = hint - ofs;
+			ofs = hint - tmp;
+		}
+		assert -1 <= lastOfs && lastOfs < ofs && ofs <= len;
+		
+		/*
+		* Now a[base+lastOfs] < key <= a[base+ofs], so key belongs somewhere
+		* to the right of lastOfs but no farther right than ofs.  Do a binary
+		* search, with invariant a[base + lastOfs - 1] < key <= a[base + ofs].
+		*/
+		lastOfs++;
+		while (lastOfs < ofs) {
+			int m = lastOfs + ((ofs - lastOfs) >>> 1);
+			
+			if (c.compare(key, a.get(base + m)) > 0)
+				lastOfs = m + 1;  // a[base + m] < key
+			else
+				ofs = m;          // key <= a[base + m]
+		}
+		assert lastOfs == ofs;    // so a[base + ofs - 1] < key <= a[base + ofs]
+		return ofs;
+}
 
+    
     /**
      * Like gallopLeft, except that if the range contains an element equal to
      * key, gallopRight returns the index after the rightmost equal element.
@@ -592,6 +824,63 @@ class TimSort {
         return ofs;
     }
     
+    private static int gallopRight(Point key, ArrayList<Point> a, int base, int len,
+            int hint, Comparator<? super Point> c) {
+		assert len > 0 && hint >= 0 && hint < len;
+		
+		int ofs = 1;
+		int lastOfs = 0;
+		if (c.compare(key, a.get(base + hint)) < 0) {
+			// Gallop left until a[b+hint - ofs] <= key < a[b+hint - lastOfs]
+			int maxOfs = hint + 1;
+			while (ofs < maxOfs && c.compare(key, a.get(base + hint - ofs)) < 0) {
+				lastOfs = ofs;
+				ofs = (ofs << 1) + 1;
+				if (ofs <= 0)   // int overflow
+					ofs = maxOfs;
+			}
+			if (ofs > maxOfs)
+				ofs = maxOfs;
+			
+			// Make offsets relative to b
+			int tmp = lastOfs;
+			lastOfs = hint - ofs;
+			ofs = hint - tmp;
+		} else { // a[b + hint] <= key
+			// Gallop right until a[b+hint + lastOfs] <= key < a[b+hint + ofs]
+			int maxOfs = len - hint;
+			while (ofs < maxOfs && c.compare(key, a.get(base + hint + ofs)) >= 0) {
+				lastOfs = ofs;
+				ofs = (ofs << 1) + 1;
+				if (ofs <= 0)   // int overflow
+					ofs = maxOfs;
+			}
+			if (ofs > maxOfs)
+				ofs = maxOfs;
+			
+			// Make offsets relative to b
+			lastOfs += hint;
+			ofs += hint;
+		}
+		assert -1 <= lastOfs && lastOfs < ofs && ofs <= len;
+		
+		/*
+		* Now a[b + lastOfs] <= key < a[b + ofs], so key belongs somewhere to
+		* the right of lastOfs but no farther right than ofs.  Do a binary
+		* search, with invariant a[b + lastOfs - 1] <= key < a[b + ofs].
+		*/
+		lastOfs++;
+		while (lastOfs < ofs) {
+			int m = lastOfs + ((ofs - lastOfs) >>> 1);
+			
+			if (c.compare(key, a.get(base + m)) < 0)
+					ofs = m;          // key < a[b + m]
+			else
+			lastOfs = m + 1;  // a[b + m] <= key
+		}
+		assert lastOfs == ofs;    // so a[b + ofs - 1] <= key < a[b + ofs]
+		return ofs;
+	}
     /**
      * Merges two adjacent runs in place, in a stable fashion.  The first
      * element of the first run must be greater than the first element of the
@@ -610,18 +899,23 @@ class TimSort {
      */
     private void mergeLo(int base1, int len1, int base2, int len2) {
         assert len1 > 0 && len2 > 0 && base1 + len1 == base2;
-
-        // Copy first run into temp array
-        Point[] a = this.a; // For performance
-        Point[] tmp = ensureCapacity(len1);
-        pointArrayCopy(a, base1, tmp, 0, len1);
+        if (a == null)
+        	mergeLo(a_, base1, len1, base2, len2);
+        else
+        	mergeLo(a, base1, len1, base2, len2);       
+    }
+    
+    private void mergeLo(ArrayList<Point> a, int base1, int len1, int base2, int len2) {
+    	// Copy first run into temp array
+        ArrayList<Point> tmp = ensureCapacity(len1, false);
+    	pointArrayCopy(a, base1, tmp, 0, len1);
 
         int cursor1 = 0;       // Indexes into tmp array
         int cursor2 = base2;   // Indexes int a
         int dest = base1;      // Indexes int a
 
         // Move first element of second run and deal with degenerate cases
-        a[dest] = a[cursor2++];
+        a.set(dest, a.get(cursor2++));
         dest++;
         if (--len2 == 0) {
             pointArrayCopy(tmp, cursor1, a, dest, len1);
@@ -629,9 +923,10 @@ class TimSort {
         }
         if (len1 == 1) {
             pointArrayCopy(a, cursor2, a, dest, len2);
-            a[dest + len2] = tmp[cursor1]; // Last elt of run 1 to end of merge
+            a.set(dest + len2, tmp.get(cursor1)); // Last elt of run 1 to end of merge
             return;
         }
+        
 
         Comparator<? super Point> c = this.c;  // Use local variable for performance
         int minGallop = this.minGallop;    //  "    "       "     "      "
@@ -646,7 +941,119 @@ class TimSort {
              */
             do {
                 assert len1 > 1 && len2 > 0;
-                if (c.compare(a[cursor2], tmp[cursor1]) < 0) {
+            	if (c.compare(a.get(cursor2), tmp.get(cursor1)) < 0) {
+            		a.set(dest, a.get(cursor2++));
+                    dest++;
+                    count2++;
+                    count1 = 0;
+                    if (--len2 == 0)
+                        break outer;
+                } else {
+                	a.set(dest, tmp.get(cursor1++));
+                    dest++;
+                    count1++;
+                    count2 = 0;
+                    if (--len1 == 1)
+                        break outer;
+                }
+                
+                
+            } while ((count1 | count2) < minGallop);
+
+            /*
+             * One run is winning so consistently that galloping may be a
+             * huge win. So try that, and continue galloping until (if ever)
+             * neither run appears to be winning consistently anymore.
+             */
+            do {
+                assert len1 > 1 && len2 > 0;
+                count1 = gallopRight(a.get(cursor2), tmp, cursor1, len1, 0, c);
+                if (count1 != 0) {
+                    pointArrayCopy(tmp, cursor1, a, dest, count1);
+                    dest += count1;
+                    cursor1 += count1;
+                    len1 -= count1;
+                    if (len1 <= 1) // len1 == 1 || len1 == 0
+                        break outer;
+                }
+                a.set(dest, a.get(cursor2++));
+                dest++;
+                if (--len2 == 0)
+                    break outer;
+
+                count2 = gallopLeft(tmp.get(cursor1), a, cursor2, len2, 0, c);
+                if (count2 != 0) {
+                    pointArrayCopy(a, cursor2, a, dest, count2);
+                    dest += count2;
+                    cursor2 += count2;
+                    len2 -= count2;
+                    if (len2 == 0)
+                        break outer;
+                }
+                a.set(dest, tmp.get(cursor1++));
+                dest++;
+                if (--len1 == 1)
+                    break outer;
+                minGallop--;
+            } while (count1 >= MIN_GALLOP | count2 >= MIN_GALLOP);
+            if (minGallop < 0)
+                minGallop = 0;
+            minGallop += 2;  // Penalize for leaving gallop mode
+        }  // End of "outer" loop
+        this.minGallop = minGallop < 1 ? 1 : minGallop;  // Write back to field
+
+        if (len1 == 1) {
+            assert len2 > 0;
+            pointArrayCopy(a, cursor2, a, dest, len2);
+            a.set(dest + len2, tmp.get(cursor1)); //  Last elt of run 1 to end of merge
+        } else if (len1 == 0) {
+            throw new IllegalArgumentException(
+                "Comparison method violates its general contract!");
+        } else {
+            assert len2 == 0;
+            assert len1 > 1;
+            pointArrayCopy(tmp, cursor1, a, dest, len1);
+        }
+    }
+    
+    private void mergeLo(Point[] a, int base1, int len1, int base2, int len2) {
+    	// Copy first run into temp array
+        Point[] tmp = ensureCapacity(len1);
+    	pointArrayCopy(a, base1, tmp, 0, len1);
+
+        int cursor1 = 0;       // Indexes into tmp array
+        int cursor2 = base2;   // Indexes int a
+        int dest = base1;      // Indexes int a
+
+        // Move first element of second run and deal with degenerate cases
+        
+    	a[dest] = a[cursor2++];
+        dest++;
+        if (--len2 == 0) {
+            pointArrayCopy(tmp, cursor1, a, dest, len1);
+            return;
+        }
+        if (len1 == 1) {
+            pointArrayCopy(a, cursor2, a, dest, len2);
+            a[dest + len2] = tmp[cursor1]; // Last elt of run 1 to end of merge
+            return;
+        }
+        
+
+        Comparator<? super Point> c = this.c;  // Use local variable for performance
+        int minGallop = this.minGallop;    //  "    "       "     "      "
+    outer:
+        while (true) {
+            int count1 = 0; // Number of times in a row that first run won
+            int count2 = 0; // Number of times in a row that second run won
+
+            /*
+             * Do the straightforward thing until (if ever) one run starts
+             * winning consistently.
+             */
+            do {
+                assert len1 > 1 && len2 > 0;
+            	if (c.compare(a[cursor2], tmp[cursor1]) < 0) {
                     a[dest] = a[cursor2++];
                     dest++;
                     count2++;
@@ -661,6 +1068,8 @@ class TimSort {
                     if (--len1 == 1)
                         break outer;
                 }
+                
+                
             } while ((count1 | count2) < minGallop);
 
             /*
@@ -732,9 +1141,130 @@ class TimSort {
      */
     private void mergeHi(int base1, int len1, int base2, int len2) {
         assert len1 > 0 && len2 > 0 && base1 + len1 == base2;
+        if (a == null)
+        	mergeHi(a_, base1, len1, base2, len2);
+        else
+        	mergeHi(a, base1, len1, base2, len2);
+    }
+    
+    private void mergeHi(ArrayList<Point> a, int base1, int len1, int base2, int len2) {
+        assert len1 > 0 && len2 > 0 && base1 + len1 == base2;
 
         // Copy second run into temp array
-        Point[] a = this.a; // For performance
+        ArrayList<Point> tmp = ensureCapacity(len2, false);
+        pointArrayCopy(a, base2, tmp, 0, len2);
+
+        int cursor1 = base1 + len1 - 1;  // Indexes into a
+        int cursor2 = len2 - 1;          // Indexes into tmp array
+        int dest = base2 + len2 - 1;     // Indexes into a
+
+        // Move last element of first run and deal with degenerate cases
+        a.set(dest, a.get(cursor1--));
+        dest--;
+        if (--len1 == 0) {
+            pointArrayCopy(tmp, 0, a, dest - (len2 - 1), len2);
+            return;
+        }
+        if (len2 == 1) {
+            dest -= len1;
+            cursor1 -= len1;
+            pointArrayCopy(a, cursor1 + 1, a, dest + 1, len1);
+            a.set(dest, tmp.get(cursor2));
+            return;
+        }
+
+        Comparator<? super Point> c = this.c;  // Use local variable for performance
+        int minGallop = this.minGallop;    //  "    "       "     "      "
+    outer:
+        while (true) {
+            int count1 = 0; // Number of times in a row that first run won
+            int count2 = 0; // Number of times in a row that second run won
+
+            /*
+             * Do the straightforward thing until (if ever) one run
+             * appears to win consistently.
+             */
+            do {
+                assert len1 > 0 && len2 > 1;
+                if (c.compare(tmp.get(cursor2), a.get(cursor1)) < 0) {
+                    a.set(dest, a.get(cursor1--));
+                    dest--;
+                    count1++;
+                    count2 = 0;
+                    if (--len1 == 0)
+                        break outer;
+                } else {
+                	a.set(dest, tmp.get(cursor2--));
+                    dest--;
+                    count2++;
+                    count1 = 0;
+                    if (--len2 == 1)
+                        break outer;
+                }
+            } while ((count1 | count2) < minGallop);
+
+            /*
+             * One run is winning so consistently that galloping may be a
+             * huge win. So try that, and continue galloping until (if ever)
+             * neither run appears to be winning consistently anymore.
+             */
+            do {
+                assert len1 > 0 && len2 > 1;
+                count1 = len1 - gallopRight(tmp.get(cursor2), a, base1, len1, len1 - 1, c);
+                if (count1 != 0) {
+                    dest -= count1;
+                    cursor1 -= count1;
+                    len1 -= count1;
+                    pointArrayCopy(a, cursor1 + 1, a, dest + 1, count1);
+                    if (len1 == 0)
+                        break outer;
+                }
+                a.set(dest, tmp.get(cursor2--));
+                dest--;
+                if (--len2 == 1)
+                    break outer;
+
+                count2 = len2 - gallopLeft(a.get(cursor1), tmp, 0, len2, len2 - 1, c);
+                if (count2 != 0) {
+                    dest -= count2;
+                    cursor2 -= count2;
+                    len2 -= count2;
+                    pointArrayCopy(tmp, cursor2 + 1, a, dest + 1, count2);
+                    if (len2 <= 1)  // len2 == 1 || len2 == 0
+                        break outer;
+                }
+                a.set(dest, a.get(cursor1--));
+                dest--;
+                if (--len1 == 0)
+                    break outer;
+                minGallop--;
+            } while (count1 >= MIN_GALLOP | count2 >= MIN_GALLOP);
+            if (minGallop < 0)
+                minGallop = 0;
+            minGallop += 2;  // Penalize for leaving gallop mode
+        }  // End of "outer" loop
+        this.minGallop = minGallop < 1 ? 1 : minGallop;  // Write back to field
+
+        if (len2 == 1) {
+            assert len1 > 0;
+            dest -= len1;
+            cursor1 -= len1;
+            pointArrayCopy(a, cursor1 + 1, a, dest + 1, len1);
+            a.set(dest, tmp.get(cursor2)); // Move first elt of run2 to front of merge
+        } else if (len2 == 0) {
+            throw new IllegalArgumentException(
+                "Comparison method violates its general contract!");
+        } else {
+            assert len1 == 0;
+            assert len2 > 0;
+            pointArrayCopy(tmp, 0, a, dest - (len2 - 1), len2);
+        }
+    }
+    
+    private void mergeHi(Point[] a, int base1, int len1, int base2, int len2) {
+        assert len1 > 0 && len2 > 0 && base1 + len1 == base2;
+
+        // Copy second run into temp array
         Point[] tmp = ensureCapacity(len2);
         pointArrayCopy(a, base2, tmp, 0, len2);
 
@@ -844,7 +1374,6 @@ class TimSort {
             pointArrayCopy(tmp, 0, a, dest - (len2 - 1), len2);
         }
     }
-    
     /**
      * Ensures that the external array tmp has at least the specified
      * number of elements, increasing its size if necessary.  The size
@@ -876,22 +1405,53 @@ class TimSort {
         return tmp;
     }
     
+    private ArrayList<Point> ensureCapacity(int minCapacity, boolean flag) {
+        if (tmp_.size() < minCapacity) {
+            // Compute smallest power of 2 > minCapacity
+            int newSize = minCapacity;
+            newSize |= newSize >> 1;
+            newSize |= newSize >> 2;
+            newSize |= newSize >> 4;
+            newSize |= newSize >> 8;
+            newSize |= newSize >> 16;
+            newSize++;
+
+            if (newSize < 0) // Not bloody likely!
+                newSize = minCapacity;
+            else
+                newSize = Math.min(newSize, a_.size() >>> 1);
+
+            @SuppressWarnings({"unchecked", "UnnecessaryLocalVariable"})
+            ArrayList<Point> newArray = new ArrayList<Point>(newSize);
+            for (int i = 0; i < newSize; i++) {
+            	newArray.add(null);
+            }
+            tmp_ = newArray;
+        }
+        return tmp_;
+    }
+    
     // Custom array copy method for copying a sub part of an array to another sub part of the same array
     private static void pointArrayCopy(Point[] source, int sourcePosition, Point[] destination, int destinationPosition, int numberOfElements) {
+    	Point[] temp = Arrays.copyOfRange(source, sourcePosition, sourcePosition + numberOfElements);
+    	System.arraycopy(temp, 0, destination, destinationPosition, temp.length);    	
+    }
+    
+    private static void pointArrayCopy(ArrayList<Point> source, int sourcePosition, ArrayList<Point> destination, int destinationPosition, int numberOfElements) {
     	int sourceIndex;
     	int destinationIndex;
 		if (sourcePosition <= destinationPosition) {
 			for (int i = 0; i < numberOfElements; i++) {    		
 	    		sourceIndex = sourcePosition + (numberOfElements - 1 - i);    		
-	    		destinationIndex = destinationPosition + (numberOfElements - 1 - i);    		
-	    		destination[destinationIndex] = source[sourceIndex];
+	    		destinationIndex = destinationPosition + (numberOfElements - 1 - i);
+	    		destination.set(destinationIndex, source.get(sourceIndex));
 	    	}
 		}
 		else {
 			for (int i = 0; i < numberOfElements; i++) {    		
 	    		sourceIndex = sourcePosition + i;    		
-	    		destinationIndex = destinationPosition + i;    		
-	    		destination[destinationIndex] = source[sourceIndex];
+	    		destinationIndex = destinationPosition + i;   
+	    		destination.set(destinationIndex, source.get(sourceIndex));
 	    	}
 		}
     	
