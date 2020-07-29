@@ -2,7 +2,6 @@ package gr.ds.unipi.spades.regularGrid;
 
 import java.util.ArrayList;
 
-import gr.ds.unipi.spades.geometry.Cell;
 import gr.ds.unipi.spades.geometry.Point;
 import scala.Tuple2;
 

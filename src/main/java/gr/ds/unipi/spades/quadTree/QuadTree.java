@@ -4,6 +4,7 @@ import java.util.ArrayList;
 
 import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
 
 public class QuadTree {
@@ -55,6 +56,40 @@ public class QuadTree {
     public void insertPoint(Point point) {
         insertPoint(root, point);
     }  
+    
+    public void insertPoint(Point point, double radius) {
+        insertPoint(root, point, radius);
+    }
+    
+    
+    // Special case to prevent leaf creation with side length less than a given number (e.g. 5*r)
+    private void insertPoint(Node node, Point point, double radius) {
+        Node leafNode = determineLeafNodeForInsertion(node, point);
+        
+        if (leafNode.getNumberOfContainedPoints() > MAX_NUMBER_OF_POINTS_IN_LEAVES) return;
+        
+        if (leafNode.getNumberOfContainedPoints() == MAX_NUMBER_OF_POINTS_IN_LEAVES) {
+        	if (MathUtils.haversineDistance(leafNode.getMinX(), (leafNode.getMaxX() + leafNode.getMinX()) / 2,
+        			 leafNode.getMinY(), leafNode.getMinY()) <= 5 * radius) {
+        		leafNode.increaseByOneNumberOfContainedPoints();
+        		return;
+        	}
+        	
+        	if (MathUtils.haversineDistance(leafNode.getMinX(), leafNode.getMinX(),
+       			 leafNode.getMinY(), (leafNode.getMaxY() + leafNode.getMinY()) / 2) <= 5 * radius) {
+        		leafNode.increaseByOneNumberOfContainedPoints();
+        		return;
+	       	}
+        	
+            createQuadrants(leafNode);
+            o++;
+            numberOfLeaves += 3;
+            disseminatePointsToQuadrants(leafNode);
+            insertPoint(leafNode, point);
+        } else {
+            addPointToNode(leafNode, point);
+        }
+    }
     
     private void insertPoint(Node node, Point point) {
 
@@ -111,7 +146,7 @@ public class QuadTree {
     public ArrayList<Tuple2<Integer, Point>> assignToLeafNodeIterator(Node node, Point point) {
     	if (node.hasChildrenQuadrants()) {
     		for (Node child : node.getChildren()) {
-    			if (child.intersects(point)) {
+    			if (child.contains(point)) {
                     return assignToLeafNodeIterator(child, point);
                 }
     		}
@@ -119,13 +154,14 @@ public class QuadTree {
     	
     	ArrayList<Tuple2<Integer, Point>> pair = new ArrayList<Tuple2<Integer, Point>>();
     	pair.add(new Tuple2<Integer, Point>(node.getId(), point));
+    	node.increaseNumberOfAssignedPoints();
     	return pair;
     }
     
     public Tuple2<Integer, Point> assignToLeafNode(Node node, Point point) {
     	if (node.hasChildrenQuadrants()) {
     		for (Node child : node.getChildren()) {
-    			if (child.intersects(point)) {
+    			if (child.contains(point)) {
                     node.increaseByOneNumberOfContainedPoints();
                     return assignToLeafNode(child, point);
                 }
@@ -138,16 +174,16 @@ public class QuadTree {
     public Node determineLeafNodeForInsertion(Node node, Point point) {
 
         if (node.hasChildrenQuadrants()) {
-            if (node.getTopLeftChildQuadrant().intersects(point)) {
+            if (node.getTopLeftChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return determineLeafNodeForInsertion(node.getTopLeftChildQuadrant(), point);
-            } else if (node.getTopRightChildQuadrant().intersects(point)) {
+            } else if (node.getTopRightChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return determineLeafNodeForInsertion(node.getTopRightChildQuadrant(), point);
-            } else if (node.getBottomRightChildQuadrant().intersects(point)) {
+            } else if (node.getBottomRightChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return determineLeafNodeForInsertion(node.getBottomRightChildQuadrant(), point);
-            } else if (node.getBottomLeftChildQuadrant().intersects(point)) {
+            } else if (node.getBottomLeftChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return determineLeafNodeForInsertion(node.getBottomLeftChildQuadrant(), point);
             } else {
@@ -164,16 +200,16 @@ public class QuadTree {
     public int getLeafNodeIdForInsertion(Node node, Point point) {
 
         if (node.hasChildrenQuadrants()) {
-            if (node.getTopLeftChildQuadrant().intersects(point)) {
+            if (node.getTopLeftChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return getLeafNodeIdForInsertion(node.getTopLeftChildQuadrant(), point);
-            } else if (node.getTopRightChildQuadrant().intersects(point)) {
+            } else if (node.getTopRightChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return getLeafNodeIdForInsertion(node.getTopRightChildQuadrant(), point);
-            } else if (node.getBottomRightChildQuadrant().intersects(point)) {
+            } else if (node.getBottomRightChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return getLeafNodeIdForInsertion(node.getBottomRightChildQuadrant(), point);
-            } else if (node.getBottomLeftChildQuadrant().intersects(point)) {
+            } else if (node.getBottomLeftChildQuadrant().contains(point)) {
                 node.increaseByOneNumberOfContainedPoints();
                 return getLeafNodeIdForInsertion(node.getBottomLeftChildQuadrant(), point);
             } else {
@@ -190,13 +226,13 @@ public class QuadTree {
 
     private void createQuadrants(Node node) {
 
-        node.setChildQuadrants(new Node(node, node.getLowerBoundx(), (node.getUpperBoundy() + node.getLowerBoundy()) / 2, (node.getUpperBoundx() + node.getLowerBoundx()) / 2, node.getUpperBoundy()),
+        node.setChildQuadrants(new Node(node, node.getMinX(), (node.getMaxY() + node.getMinY()) / 2, (node.getMaxX() + node.getMinX()) / 2, node.getMaxY()),
 
-        		new Node(node, (node.getUpperBoundx() + node.getLowerBoundx()) / 2, (node.getUpperBoundy() + node.getLowerBoundy()) / 2, node.getUpperBoundx(), node.getUpperBoundy()),
+        		new Node(node, (node.getMaxX() + node.getMinX()) / 2, (node.getMaxY() + node.getMinY()) / 2, node.getMaxX(), node.getMaxY()),
 
-        		new Node(node, (node.getUpperBoundx() + node.getLowerBoundx()) / 2, node.getLowerBoundy(), node.getUpperBoundx(), (node.getUpperBoundy() + node.getLowerBoundy()) / 2),
+        		new Node(node, (node.getMaxX() + node.getMinX()) / 2, node.getMinY(), node.getMaxX(), (node.getMaxY() + node.getMinY()) / 2),
 
-        		new Node(node, node.getLowerBoundx(), node.getLowerBoundy(), (node.getUpperBoundx() + node.getLowerBoundx()) / 2, (node.getUpperBoundy() + node.getLowerBoundy()) / 2));
+        		new Node(node, node.getMinX(), node.getMinY(), (node.getMaxX() + node.getMinX()) / 2, (node.getMaxY() + node.getMinY()) / 2));
     }
 
     private void disseminatePointsToQuadrants(Node node) {
@@ -205,22 +241,22 @@ public class QuadTree {
 
         for (int i = 0; i < points.length; i++) {
 
-            if (node.getTopLeftChildQuadrant().intersects(points[i])) {
+            if (node.getTopLeftChildQuadrant().contains(points[i])) {
                 addPointToNode(node.getTopLeftChildQuadrant(), points[i]);
                 continue;
             }
 
-            if (node.getTopRightChildQuadrant().intersects(points[i])) {
+            if (node.getTopRightChildQuadrant().contains(points[i])) {
                 addPointToNode(node.getTopRightChildQuadrant(), points[i]);
                 continue;
             }
 
-            if (node.getBottomRightChildQuadrant().intersects(points[i])) {
+            if (node.getBottomRightChildQuadrant().contains(points[i])) {
                 addPointToNode(node.getBottomRightChildQuadrant(), points[i]);
                 continue;
             }
 
-            if (node.getBottomLeftChildQuadrant().intersects(points[i])) {
+            if (node.getBottomLeftChildQuadrant().contains(points[i])) {
                 addPointToNode(node.getBottomLeftChildQuadrant(), points[i]);
                 continue;
             }
@@ -235,6 +271,10 @@ public class QuadTree {
 
         if (node.getPoints() == null) {
             node.setPoints(new Point[MAX_NUMBER_OF_POINTS_IN_LEAVES]);
+        }
+        
+        if (node.getNumberOfContainedPoints() == MAX_NUMBER_OF_POINTS_IN_LEAVES) {
+        	return;
         }
 
         node.getPoints()[node.getNumberOfContainedPoints()] = point;

@@ -1,7 +1,7 @@
 package gr.ds.unipi.spades;
 
-import gr.ds.unipi.spades.geometry.Cell;
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.regularGrid.Cell;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;

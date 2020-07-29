@@ -14,9 +14,8 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.api.java.function.FlatMapFunction;
-import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.storage.StorageLevel;
 
 import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
@@ -43,7 +42,8 @@ public class App
         // Constant parameters;
         int file1LonIndex = 1; int file1LatIndex = 2; int file1Tag = 1;
 		int file2LonIndex = 1; int file2LatIndex = 2; int file2Tag = 2; int file2KeywordsIndex = 3;
-		
+		int numberOfWorkers = 12;
+		LoadBalancer lb = new LoadBalancer(numberOfWorkers);
 		// This MUST be a Regex
 		String file2KeywordsSeparator = ",";
 		
@@ -101,7 +101,7 @@ public class App
     	String dist = "Clustered";
     	String[] keywords;
     	
-    	FileWriter csvWriter = new FileWriter("C:/Users/user/Desktop/experiments_s1M.csv");
+    	FileWriter csvWriter = new FileWriter("C:/Users/user/Desktop/1_loadbalancer_s1M.csv");
     	
     	addLabels(csvWriter);
     	
@@ -110,6 +110,7 @@ public class App
     	long pairsRG = 0;
     	long ppsj = 0;
     	long pJC = 0;
+    	double toSecondsFactor = Math.pow(10, 9);
     	int numberOfResults = 10;
     	for (int i = 0; i < numberOfRunsPerFileSet; i++) {
     		try {
@@ -126,51 +127,15 @@ public class App
         			keywords = getRandomElements(categories, 3);
         		}
         		
-        		FileWriter loadBalance = new FileWriter("C:/Users/user/Desktop/LoadBalance/countByKey_" + i + ".csv");
+        		FileWriter loadBalance = new FileWriter("C:/Users/user/Desktop/LoadBalance/1_countByKey_" + i + ".csv");
         		loadBalance.write("Structure,Leaf/Cell Id,Points\n");
-        		// ------------ QUAD TREE ---------------
+        		
         		// Map lines to points
             	JavaRDD<Point> points = stj.mapToPoints(file, broadcastStj, keywords);
-        		long startTime = System.nanoTime();
-            	// Create quad tree (Global Indexing)
-            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, samplePercentage, points);
-            	long elapsedTime1 = System.nanoTime() - startTime;  
+        		
+// ------------ REGULAR GRID ---------------
             	
-            	// Broadcast quad tree
-            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
-            	
-            	JavaPairRDD<Integer, Iterable<Point>> groupedPairs = stj.map(points, broadcastQuadTree, radius, keywords, broadcastStj);
-            	
-            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
-            		List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
-            		return pp.size();
-            	}).collect();
-
-            	for(Tuple2<Integer, Integer> pair : counts) {
-            	    loadBalance.write("Quad Tree," + pair._1.intValue() + "," + pair._2.intValue() + "\n");
-            	}
-            	
-            	startTime = System.nanoTime();
-            	ArrayList<Tuple2<Point, Point>> out = new ArrayList<Tuple2<Point, Point>>(stj.reduce(groupedPairs, radius, numberOfResults, broadcastStj).collect());
-            	out.sort(FeatureObject.PairComparator);
-            	List<Tuple2<Point, Point>> results = new ArrayList<Tuple2<Point, Point>>();
-            	for (int j = 0; j < numberOfResults; j++) {
-            		results.add(out.get(j));
-            	}
-            	
-        		pairsQT = results.size();
-        		long elapsedTime2 = System.nanoTime() - startTime;  
-        		double toSecondsFactor = Math.pow(10, 9);
-            	csvWriter.append("Quad Tree," + dist + "," + inputSize + "," + radius + "," + keywords.length + ",," + samplePointsPerLeaf + ",[0-10],[0-10]," + 
-            			elapsedTime1 / toSecondsFactor + "," + elapsedTime2 / toSecondsFactor + "," + broadcastStj.getValue().getHaversineCount() + ","
-            			+ broadcastStj.getValue().getJaccardCount() + "," + broadcastStj.getValue().getPairsCount() + ",No\n");
-            	
-            	
-            	
-            	
-            	// ------------ REGULAR GRID ---------------
-            	
-            	startTime = System.nanoTime();
+            	long startTime = System.nanoTime();
             	// Create regular grid (Global Indexing)
             	RegularGrid grid = stj.createRegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
             	long elapsedTime3 = System.nanoTime() - startTime;  
@@ -178,20 +143,24 @@ public class App
             	// Broadcast regular grid
             	Broadcast<RegularGrid> broadcastRegularGrid = sc.broadcast(grid);
             	
-            	groupedPairs = stj.map(points, broadcastRegularGrid, radius, keywords, broadcastStj);
-            	counts = groupedPairs.mapValues(iter -> {
-            		List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
-            		return pp.size();
-            	}).collect();
+            	JavaPairRDD<Integer, List<Point>> groupedPairs = stj.map(points, broadcastRegularGrid, radius, keywords, broadcastStj);
+            	//lb.assignDataToReducer(broadcastStj.getValue().getBins());
+            	//groupedPairs = groupedPairs.partitionBy(lb);
+//            	counts = groupedPairs.mapValues(iter -> {
+//            		List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+//            		return pp.size();
+//            	}).collect();
 
-            	for(Tuple2<Integer, Integer> pair : counts) {
-            	    loadBalance.write("Regular Grid," + pair._1.intValue() + "," + pair._2.intValue() + "\n");
-            	}       	
+//            	for(Tuple2<Integer, Integer> pair : counts) {
+//            	    loadBalance.write("Regular Grid," + pair._1.intValue() + "," + pair._2.intValue() + "\n");
+//            	}     
+            	
+            	
             	
             	startTime = System.nanoTime();
-            	out = new ArrayList<Tuple2<Point, Point>>(stj.reduce(groupedPairs, radius, numberOfResults, broadcastStj).collect());
+            	ArrayList<Tuple2<Point, Point>>  out = new ArrayList<Tuple2<Point, Point>>(stj.reduce(groupedPairs, radius, numberOfResults, broadcastStj).collect());
             	out.sort(FeatureObject.PairComparator);
-            	results = new ArrayList<Tuple2<Point, Point>>();
+            	List<Tuple2<Point, Point>>  results = new ArrayList<Tuple2<Point, Point>>();
             	for (int j = 0; j < numberOfResults; j++) {
             		results.add(out.get(j));
             	}
@@ -201,6 +170,57 @@ public class App
             	csvWriter.append("Regular Grid," + dist + "," + inputSize + "," + radius + "," + keywords.length + "," + hSectors + "x" + vSectors + ",,[0-10],[0-10]," + 
             			elapsedTime3 / toSecondsFactor + "," + elapsedTime4 / toSecondsFactor + "," + broadcastStj.getValue().getHaversineCount() + ","
             			+ broadcastStj.getValue().getJaccardCount() + "," + broadcastStj.getValue().getPairsCount() + ",No\n");
+            	
+//            	for(Integer key : lb.loadsSizes.keySet()) {
+//            	    loadBalance.write("Regular Grid," + key.intValue() + "," + lb.loadsSizes.get(key).intValue() + "\n");
+//            	} 
+            	
+        		
+        		
+        		// ------------ QUAD TREE ---------------
+        		
+        		startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, samplePercentage, points, radius);
+            	long elapsedTime1 = System.nanoTime() - startTime;  
+            	
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	
+            	groupedPairs = stj.map(points, broadcastQuadTree, radius, keywords, broadcastStj);
+            	//lb.assignDataToReducer(broadcastStj.getValue().getBins());
+            	//groupedPairs = groupedPairs.partitionBy(lb);
+            	
+//            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+//            		List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+//            		return pp.size();
+//            	}).collect();
+
+//            	for(Tuple2<Integer, Integer> pair : counts) {
+//            	    loadBalance.write("Quad Tree," + pair._1.intValue() + "," + pair._2.intValue() + "\n");
+//            	}
+//            	
+            	
+            	
+            	startTime = System.nanoTime();
+            	out = new ArrayList<Tuple2<Point, Point>>(stj.reduce(groupedPairs, radius, numberOfResults, broadcastStj).collect());
+            	out.sort(FeatureObject.PairComparator);
+            	results = new ArrayList<Tuple2<Point, Point>>();
+            	for (int j = 0; j < numberOfResults; j++) {
+            		results.add(out.get(j));
+            	}
+            	
+        		pairsQT = results.size();
+        		long elapsedTime2 = System.nanoTime() - startTime;  
+        		
+            	csvWriter.append("Quad Tree," + dist + "," + inputSize + "," + radius + "," + keywords.length + ",," + samplePointsPerLeaf + ",[0-10],[0-10]," + 
+            			elapsedTime1 / toSecondsFactor + "," + elapsedTime2 / toSecondsFactor + "," + broadcastStj.getValue().getHaversineCount() + ","
+            			+ broadcastStj.getValue().getJaccardCount() + "," + broadcastStj.getValue().getPairsCount() + ",No\n");
+            	
+//            	for(Integer key : lb.loadsSizes.keySet()) {
+//            	    loadBalance.write("Quad Tree," + key.intValue() + "," + lb.loadsSizes.get(key).intValue() + "\n");
+//            	} 
+            	
             	
             	
             	loadBalance.write("QT Dupl," + stj.getQuadTreeDuplications() + ",RG Dupl," + stj.getRegularGridDuplications() + "\n");

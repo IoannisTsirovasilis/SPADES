@@ -3,8 +3,8 @@ package gr.ds.unipi.spades.util;
 import java.util.HashSet;
 import java.util.Set;
 
-import gr.ds.unipi.spades.geometry.Cell;
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.geometry.Rectangle;
 
 
 public class MathUtils {
@@ -77,53 +77,57 @@ public class MathUtils {
 	//	 |						|
 	//	 ------------------------
 	// 6            5             4                
-	public static double pointToCellDistance(Point point, Cell cell) {
-		double dx = Math.max(cell.getMinX() - point.getX(), 0);
-		double dy = Math.max(cell.getMinY() - point.getY(), 0);
+	public static double pointToRectangleDistance(Point point, Rectangle rect) {
+		double dx = Math.max(rect.getMinX() - point.getX(), 0);
+		double dy = Math.max(rect.getMinY() - point.getY(), 0);
 		
 		if (dx > 0) {
 			// case 6
 			if (dy > 0) {
-				return haversineDistance(point.getX(), cell.getMinX(), point.getY(), cell.getMinY());
+				return haversineDistance(point.getX(), rect.getMinX(), point.getY(), rect.getMinY());
 			}
 			
-			dy = Math.max(dy, point.getY() - cell.getMaxY());
+			dy = Math.max(dy, point.getY() - rect.getMaxY());
 			
 			// case 7
 			if (dy == 0) {
-				return haversineDistance(point.getX(), cell.getMinX(), point.getY(), point.getY());
+				return haversineDistance(point.getX(), rect.getMinX(), point.getY(), point.getY());
 			}
 			
 			// case 0
-			return haversineDistance(point.getX(), cell.getMinX(), point.getY(), cell.getMaxY());
+			return haversineDistance(point.getX(), rect.getMinX(), point.getY(), rect.getMaxY());
 		} 
 		
-		dx = Math.max(dx, point.getX() - cell.getMaxX());
+		dx = Math.max(dx, point.getX() - rect.getMaxX());
 		
 		if (dx == 0) {
 			// case 5
 			if (dy > 0) {
-				return haversineDistance(point.getX(), point.getX(), point.getY(), cell.getMinY());
+				return haversineDistance(point.getX(), point.getX(), point.getY(), rect.getMinY());
 			}
 						
 			// case 1
-			return haversineDistance(point.getX(), point.getX(), point.getY(), cell.getMaxY());
+			return haversineDistance(point.getX(), point.getX(), point.getY(), rect.getMaxY());
 		}
 		
 		// case 4
 		if (dy > 0) {
-			return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), cell.getMinY());
+			return haversineDistance(point.getX(), rect.getMaxX(), point.getY(), rect.getMinY());
 		}
 		
-		dy = Math.max(dy, point.getY() - cell.getMaxY());
+		dy = Math.max(dy, point.getY() - rect.getMaxY());
 		
 		// case 3
 		if (dy == 0) {
-			return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), point.getY());
+			return haversineDistance(point.getX(), rect.getMaxX(), point.getY(), point.getY());
 		}
 		
 		
 		// case 2
-		return haversineDistance(point.getX(), cell.getMaxX(), point.getY(), cell.getMaxY());
+		return haversineDistance(point.getX(), rect.getMaxX(), point.getY(), rect.getMaxY());
+	}
+	
+	public static void main(String[] args) {
+		System.out.println(haversineDistance(0, 0.009, 90, 90));
 	}
 }

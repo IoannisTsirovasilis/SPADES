@@ -2,16 +2,16 @@ package gr.ds.unipi.spades.geometry;
 
 import gr.ds.unipi.spades.util.MathUtils;
 
-public class Cell {
-	private double minX, minY, maxX, maxY;
-	private int id;
+public class Rectangle {
+	protected double minX, minY, maxX, maxY;
 	
-	public Cell(double minX, double minY, double maxX, double maxY, int id) {
+	public Rectangle() {}
+	
+	public Rectangle(double minX, double minY, double maxX, double maxY) {
 		this.minX = minX;
 		this.minY = minY;
 		this.maxX = maxX;
 		this.maxY = maxY;
-		this.id = id;
 	}
 	
 	public double getMinX() {
@@ -30,14 +30,10 @@ public class Cell {
 		return maxY;
 	}
 	
-	public int getId() {
-		return id;
-	}
-	
 	// https://stackoverflow.com/questions/5254838/calculating-distance-between-a-point-and-a-rectangular-box-nearest-point
-		public boolean isInDistance(Point point, double radius) {
-			return MathUtils.pointToCellDistance(point, this) <= radius;
-		}
+	public boolean isInDistance(Point point, double radius) {
+		return MathUtils.pointToRectangleDistance(point, this) <= radius;
+	}
 	
 	public boolean contains(double x, double y) {
 		return minX <= x && minY <= y 
@@ -49,12 +45,12 @@ public class Cell {
 				&& maxX  >= p.getX() && maxY >= p.getY();
 	}
 	
-	public boolean equals(Cell cell) {		
-		if (minX != cell.minX || minY != cell.minY) {
+	public boolean equals(Rectangle rect) {		
+		if (minX != rect.minX || minY != rect.minY) {
 			return false;
 		}
 		
-		if (maxX != cell.maxX || maxY != cell.maxY) {
+		if (maxX != rect.maxX || maxY != rect.maxY) {
 			return false;
 		}
 		

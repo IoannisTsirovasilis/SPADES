@@ -1,26 +1,23 @@
 package gr.ds.unipi.spades.quadTree;
 
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.geometry.Rectangle;
 
-public class Node {	  
-	private double upperBoundx;
-    private double upperBoundy;
-    private double lowerBoundx;
-    private double lowerBoundy;
+public class Node extends Rectangle {	 
     private int id;
     private static int idCounter = 0;
     private int numberOfContainedPoints;
     private boolean hasChildrenQuadrants = false;
     private Point[] points;
+    private int numberOfAssignedPoints = 0;
 	
-	public Node() {}
+    public Node() {
+    	id = newId();
+    }
 	
-    public Node(Node parent, double lowerBoundx, double lowerBoundy, double upperBoundx, double upperBoundy) {
+    public Node(Node parent, double minX, double minY, double maxX, double maxY) {
+    	super(minX, minY, maxX, maxY);
         this.parent = parent;
-        this.upperBoundx = upperBoundx;
-        this.upperBoundy = upperBoundy;
-        this.lowerBoundx = lowerBoundx;
-        this.lowerBoundy = lowerBoundy;
         id = newId();
     }
 
@@ -45,6 +42,14 @@ public class Node {
 
     public int getNumberOfContainedPoints() {
         return numberOfContainedPoints;
+    }
+    
+    public int getNumberOfAssignedPoints() {
+    	return numberOfAssignedPoints;
+    }
+    
+    public void increaseNumberOfAssignedPoints() {
+    	numberOfAssignedPoints++;
     }
 
     
@@ -94,30 +99,6 @@ public class Node {
         return children[3];
     }   
 
-    public double getUpperBoundx() {
-        return upperBoundx;
-    }
-
-    public double getUpperBoundy() {
-        return upperBoundy;
-    }
-
-    public double getLowerBoundx() {
-        return lowerBoundx;
-    }
-
-    public double getLowerBoundy() {
-        return lowerBoundy;
-    }
-
-    public boolean intersects(Point point){
-        if(((Double.compare(lowerBoundx, point.getX()) != 1) && (Double.compare(upperBoundx, point.getX()) == 1)) &&
-                ((Double.compare(lowerBoundy, point.getY()) != 1) && (Double.compare(upperBoundy, point.getY()) == 1))){
-            return true;
-        }
-        return false;
-    }
-
     public Point[] getPoints() {
         return points;
     }
@@ -129,14 +110,14 @@ public class Node {
     public String toString(){
         StringBuilder sb = new StringBuilder();
         sb.append("Top Left");
-        return "Node ["+lowerBoundx + ","+lowerBoundy +"], ["+upperBoundx +","+upperBoundy +"]" +" - has "+ getNumberOfContainedPoints() + " array:"+getPoints();
+        return "Node ["+ minX + ","+ minY +"], ["+ maxX +","+ maxY +"]" +" - has "+ getNumberOfContainedPoints() + " array:"+getPoints();
 
     }
     
     // Node - Rectangle intersection
     // https://stackoverflow.com/questions/306316/determine-if-two-rectangles-overlap-each-other
     public boolean intersects(double minX, double minY, double maxX, double maxY) {
-    	return !(lowerBoundx > maxX || upperBoundx < minX || lowerBoundy > maxY || upperBoundy < minY);
+    	return !(this.minX > maxX || this.maxX < minX || this.minX > maxY || this.maxY < minY);
     }    
     
     
@@ -145,9 +126,14 @@ public class Node {
     @Override
     public boolean equals(Object obj) {
     	if (obj.getClass() == this.getClass()) {
-    		return ((Node) obj).getId() == this.getId();
+    		return ((Node) obj).hashCode() == this.hashCode();
     	}
     	
     	return false;
+    }
+    
+    @Override
+    public int hashCode() {
+        return id;
     }
 }

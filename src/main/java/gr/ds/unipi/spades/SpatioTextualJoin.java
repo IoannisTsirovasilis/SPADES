@@ -2,6 +2,7 @@ package gr.ds.unipi.spades;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
@@ -13,8 +14,11 @@ import org.apache.spark.broadcast.Broadcast;
 import gr.ds.unipi.spades.geometry.DataObject;
 import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.geometry.Rectangle;
+import gr.ds.unipi.spades.quadTree.Node;
 import gr.ds.unipi.spades.quadTree.QuadTree;
 import gr.ds.unipi.spades.regularGrid.RegularGrid;
+import gr.ds.unipi.spades.regularGrid.Cell;
 import gr.ds.unipi.spades.util.MathUtils;
 import gr.ds.unipi.spades.util.Points;
 import scala.Tuple2;
@@ -27,6 +31,7 @@ public class SpatioTextualJoin {
 	private int pairsCount;
 	private int quadTreeDuplications;
 	private int regularGridDuplications;
+	private HashMap<Integer, Integer> bins = new HashMap<Integer, Integer>();
 	
 	// File 1 Fields (Data Objects)
 	private int file1LonIndex, file1LatIndex, file1Tag;
@@ -59,6 +64,24 @@ public class SpatioTextualJoin {
 		this.file2KeywordsSeparator = file2KeywordsSeparator;
 		this.separator = separator;
 		this.tagIndex = tagIndex;
+	}
+	
+	public HashMap<Integer, Integer> getBins() {
+		return bins;
+	}
+	
+	public void insertToBins(Integer key, Integer value) {
+		if (bins.containsKey(key)) return;
+		
+		bins.put(key, value);
+	}
+	
+	public void incrementBinsKey(Integer key) {
+		if (!bins.containsKey(key)) { 
+			insertToBins(key, new Integer(1));
+			return;
+		}
+		bins.replace(key, new Integer(bins.get(key).intValue() + 1));
 	}
 	
 	public int getQuadTreeDuplications() {
@@ -101,7 +124,27 @@ public class SpatioTextualJoin {
         List<Point> sample = points.takeSample(false, (int) (points.count() * samplePercentage));
         
         for (Point p : sample) {
+        	//quadTree.insertPoint(p, radius);
         	quadTree.insertPoint(p);
+        }   
+        
+        return quadTree;
+	}
+	
+	public QuadTree createQuadTree(double minX, double minY, double maxX, double maxY, int samplePointsPerLeaf, double samplePercentage, JavaRDD<Point> points
+			, double radius) {
+		
+		// If a point is on the edges of the root's boundaries, it will throw an error. Adding a small padding
+		double epsilon = 0.00001;
+		
+		QuadTree quadTree = new QuadTree(minX - epsilon, minY - epsilon, maxX + epsilon, maxY + epsilon, samplePointsPerLeaf);
+		
+		// sampling
+        List<Point> sample = points.takeSample(false, (int) (points.count() * samplePercentage));
+        
+        for (Point p : sample) {
+        	//quadTree.insertPoint(p, radius);
+        	quadTree.insertPoint(p, radius);
         }   
         
         return quadTree;
@@ -141,7 +184,7 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-	public JavaPairRDD<Integer, Iterable<Point>> map(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+	public JavaPairRDD<Integer, List<Point>> map(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
 			double radius, String[] keywords, Broadcast<SpatioTextualJoin> broadcastStj) {
 		
 		Object spatialIndex = broadcastSpatialIndex.getValue();
@@ -152,7 +195,9 @@ public class SpatioTextualJoin {
 	        	SpatioTextualJoin stj = broadcastStj.getValue();
 	        	if (point.getClass() == DataObject.class) {
 	        		DataObject dataObject = (DataObject) point;
-	        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
+	        		ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeIterator(qt.getRoot(), dataObject);
+	        		stj.incrementBinsKey(result.get(0)._1);
+	        		return result.iterator();
 	        	} else {
 	        		FeatureObject featureObject = (FeatureObject) point;
 
@@ -167,6 +212,9 @@ public class SpatioTextualJoin {
 	            	
 	            	// Assign point to every leaf that intersects with the square
 	            	ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject);
+	            	for (Tuple2<Integer, Point> pair : result) {
+	            		stj.incrementBinsKey(pair._1);
+	            	}
 	            	stj.quadTreeDuplications += result.size() - 1;
 	            	return result.iterator();
 	        	}       	
@@ -181,9 +229,12 @@ public class SpatioTextualJoin {
 	        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
 	        	SpatioTextualJoin stj = broadcastStj.getValue();
 	        	if (point.getClass() == DataObject.class) {
-	        		return grid.assignToCellIterator(point).iterator();
+	        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellIterator(point);
+	        		stj.incrementBinsKey(result.get(0)._1);
+	        		return result.iterator();
 	        	} else {
 	        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+	        		for (Tuple2<Integer, Point> pair : result) stj.incrementBinsKey(pair._1);
 	        		stj.regularGridDuplications += result.size() - 1;
 	            	return result.iterator();
 	        	}            	
@@ -199,51 +250,51 @@ public class SpatioTextualJoin {
 	}
 	
 	// Map to pairs
-		public JavaPairRDD<Integer, Iterable<Point>> mapPlaneSweep(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
-				double radius, String[] keywords) {
-			Object spatialIndex = broadcastSpatialIndex.getValue();
-			if (spatialIndex.getClass() == QuadTree.class) {
-				return points.flatMapToPair(point -> {
-		        	// Get broadcasted values 
-		        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
-		        	
-		        	if (point.getClass() == DataObject.class) {
-		        		DataObject dataObject = (DataObject) point;
-		        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
-		        	} else {
-		        		FeatureObject featureObject = (FeatureObject) point;
-		        		
-		        		// else construct square around point with size length "radius" and center "point"   
-		            	// 0, 90, 180, 270 represents navigation bearing
-		            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
-		            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
-		            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
-		            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
-		            	
-		            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
-		            	
-		            	// Assign point to every leaf that intersects with the square
-		            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
-		        	}       	
-		        }).groupByKey();
-			} else if (spatialIndex.getClass() == RegularGrid.class) {
-				return points.flatMapToPair(point -> {
-		        	// Get broadcasted values 
-		        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
-		        	return point.getClass() == DataObject.class ? grid.assignToCellIterator(point).iterator() : 
-		        		grid.assignToCellAndDuplicate(point, radius).iterator(); 	
-		        }).groupByKey();
-			} else {
-				throw new IllegalArgumentException("Invalid spatial index provided.");
-			}
-			
-		}
-		
+//	public JavaPairRDD<Integer, Iterable<Point>> mapPlaneSweep(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+//			double radius, String[] keywords) {
+//		Object spatialIndex = broadcastSpatialIndex.getValue();
+//		if (spatialIndex.getClass() == QuadTree.class) {
+//			return points.flatMapToPair(point -> {
+//	        	// Get broadcasted values 
+//	        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
+//	        	
+//	        	if (point.getClass() == DataObject.class) {
+//	        		DataObject dataObject = (DataObject) point;
+//	        		return qt.assignToLeafNodeIterator(qt.getRoot(), dataObject).iterator();
+//	        	} else {
+//	        		FeatureObject featureObject = (FeatureObject) point;
+//	        		
+//	        		// else construct square around point with size length "radius" and center "point"   
+//	            	// 0, 90, 180, 270 represents navigation bearing
+//	            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
+//	            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
+//	            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
+//	            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
+//	            	
+//	            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+//	            	
+//	            	// Assign point to every leaf that intersects with the square
+//	            	return qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject).iterator();
+//	        	}       	
+//	        }).groupByKey();
+//		} else if (spatialIndex.getClass() == RegularGrid.class) {
+//			return points.flatMapToPair(point -> {
+//	        	// Get broadcasted values 
+//	        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
+//	        	return point.getClass() == DataObject.class ? grid.assignToCellIterator(point).iterator() : 
+//	        		grid.assignToCellAndDuplicate(point, radius).iterator(); 	
+//	        }).groupByKey();
+//		} else {
+//			throw new IllegalArgumentException("Invalid spatial index provided.");
+//		}
+//		
+//	}
+//		
 	// Reduce
     // Produce result set (pairs of interest)
-	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, Iterable<Point>> pairs,
+	public JavaRDD<Tuple2<Point, Point>> reduce(JavaPairRDD<Integer, List<Point>> pairs,
 			double radius, int numberOfResults, Broadcast<SpatioTextualJoin> broadcastStj) {        		
-        resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, Iterable<Point>>, Tuple2<Point, Point>>) pair -> {
+        resultPairs = pairs.flatMap((FlatMapFunction<Tuple2<Integer, List<Point>>, Tuple2<Point, Point>>) pair -> {
         	
         	// output is used to hold result point pairs 
         	ArrayList<Tuple2<Point, Point>> output = new ArrayList<Tuple2<Point, Point>>();

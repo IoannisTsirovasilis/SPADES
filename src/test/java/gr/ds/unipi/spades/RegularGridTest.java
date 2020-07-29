@@ -5,7 +5,7 @@ import gr.ds.unipi.spades.regularGrid.RegularGrid;
 import java.util.ArrayList;
 import java.util.Comparator;
 
-import gr.ds.unipi.spades.geometry.Cell;
+import gr.ds.unipi.spades.regularGrid.Cell;
 import gr.ds.unipi.spades.geometry.Point;
 import junit.framework.Test;
 import junit.framework.TestCase;
