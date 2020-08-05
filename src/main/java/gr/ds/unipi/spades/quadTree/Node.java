@@ -117,7 +117,7 @@ public class Node extends Rectangle {
     // Node - Rectangle intersection
     // https://stackoverflow.com/questions/306316/determine-if-two-rectangles-overlap-each-other
     public boolean intersects(double minX, double minY, double maxX, double maxY) {
-    	return !(this.minX > maxX || this.maxX < minX || this.minX > maxY || this.maxY < minY);
+    	return !(this.minX > maxX || this.maxX < minX || this.minY > maxY || this.maxY < minY);
     }    
     
     
