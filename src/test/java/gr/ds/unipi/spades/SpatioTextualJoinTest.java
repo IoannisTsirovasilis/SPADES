@@ -46,12 +46,12 @@ public class SpatioTextualJoinTest extends TestCase
     	SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
         conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
-        	Point[].class, Node[].class, MathUtils.class, SpatioTextualJoin.class });
+        	Point[].class, Node[].class, MathUtils.class, TopKApp.class });
         
         JavaSparkContext sc = new JavaSparkContext(conf);
-        SpatioTextualJoin stj = new SpatioTextualJoin(1, 2, 1, 1, 2, 2, 3, "\\|", ",", 0);
+        TopKApp stj = new TopKApp(1, 2, 1, 1, 2, 2, 3, "\\|", ",", 0);
         String[] keywords = new String[] {"italian"};
-        Broadcast<SpatioTextualJoin> broadcastStj = sc.broadcast(stj);
+        Broadcast<TopKApp> broadcastStj = sc.broadcast(stj);
         String FILE_PATH = "C:\\Users\\user\\OneDrive\\Documents\\SPADES Project\\Datasets\\";
     	String pathToCsv = FILE_PATH + "dataObjects.csv," + FILE_PATH + "featureObjects.csv";
     	JavaRDD<String> file = sc.textFile(pathToCsv);

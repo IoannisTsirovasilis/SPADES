@@ -2,8 +2,14 @@ package gr.ds.unipi.spades.quadTree;
 
 import java.util.ArrayList;
 
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.broadcast.Broadcast;
+
+import gr.ds.unipi.spades.geometry.DataObject;
 import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
+import gr.ds.unipi.spades.queries.Query;
 import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
 
@@ -52,7 +58,11 @@ public class QuadTree {
     public int getNumberOfFullLeaves() {
     	return numberOfFullLeaves;
     }
-
+    
+    public Node insertPointGetNode(Point point) {
+    	return insertPointGetNode(root, point);
+    }
+    
     public void insertPoint(Point point) {
         insertPoint(root, point);
     }  
@@ -61,6 +71,35 @@ public class QuadTree {
         insertPoint(root, point, radius);
     }
     
+    public static JavaPairRDD<Integer, Point> assignPointsToNodes(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+			double radius) {
+    	return points.flatMapToPair(point -> {
+        	// Get broadcasted values 
+        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
+        	if (point.getClass() == DataObject.class) {
+        		DataObject dataObject = (DataObject) point;
+        		ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeIterator(qt.getRoot(), dataObject);
+//        		stj.incrementBinsKey(result.get(0)._1);
+        		return result.iterator();
+        	} else {
+        		FeatureObject featureObject = (FeatureObject) point;
+
+				// else construct square around point with size length "radius" and center "point"   
+            	// 0, 90, 180, 270 represents navigation bearing
+            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
+            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
+            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
+            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
+            	
+            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+            	
+            	// Assign point to every leaf that intersects with the square
+            	ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject);
+
+            	return result.iterator();
+        	}
+        });	
+	}
     
     // Special case to prevent leaf creation with side length less than a given number (e.g. 5*r)
     private void insertPoint(Node node, Point point, double radius) {
@@ -70,13 +109,13 @@ public class QuadTree {
         
         if (leafNode.getNumberOfContainedPoints() == MAX_NUMBER_OF_POINTS_IN_LEAVES) {
         	if (MathUtils.haversineDistance(leafNode.getMinX(), (leafNode.getMaxX() + leafNode.getMinX()) / 2,
-        			 leafNode.getMinY(), leafNode.getMinY()) <= 5 * radius) {
+        			 leafNode.getMinY(), leafNode.getMinY()) <= 12 * radius) {
         		leafNode.increaseByOneNumberOfContainedPoints();
         		return;
         	}
         	
         	if (MathUtils.haversineDistance(leafNode.getMinX(), leafNode.getMinX(),
-       			 leafNode.getMinY(), (leafNode.getMaxY() + leafNode.getMinY()) / 2) <= 5 * radius) {
+       			 leafNode.getMinY(), (leafNode.getMaxY() + leafNode.getMinY()) / 2) <= 12 * radius) {
         		leafNode.increaseByOneNumberOfContainedPoints();
         		return;
 	       	}
@@ -103,6 +142,21 @@ public class QuadTree {
             insertPoint(leafNode, point);
         } else {
             addPointToNode(leafNode, point);
+        }
+    }
+    
+    private Node insertPointGetNode(Node node, Point point) {
+    	Node leafNode = determineLeafNodeForInsertion(node, point);
+
+        if (leafNode.getNumberOfContainedPoints() == MAX_NUMBER_OF_POINTS_IN_LEAVES) {
+            createQuadrants(leafNode);
+            o++;
+            numberOfLeaves += 3;
+            disseminatePointsToQuadrants(leafNode);
+            return insertPointGetNode(leafNode, point);
+        } else {
+            addPointToNode(leafNode, point);
+            return leafNode;
         }
     }
     

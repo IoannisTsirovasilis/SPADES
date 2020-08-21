@@ -29,6 +29,11 @@ public class MathUtils {
 		return new Point(x, y);	
     }
 	
+	public static boolean rectangleContains(double minX, double minY, double maxX, double maxY, Point p) {
+		return minX <= p.getX() && minY <= p.getY()
+				&& maxX  >= p.getX() && maxY >= p.getY();
+	}
+	
 	public static double getXInDistanceOnEquator(double x, double distance) {
 		return getPointInDistanceAndBearing(new Point(x, 0), distance, 90).getX();
 	}

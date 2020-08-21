@@ -10,6 +10,8 @@ import java.util.TreeSet;
 import org.apache.spark.Partitioner;
 import org.apache.spark.broadcast.Broadcast;
 
+import gr.ds.unipi.spades.queries.Query;
+
 public class LoadBalancer extends Partitioner {
 	
 	/**
@@ -25,11 +27,11 @@ public class LoadBalancer extends Partitioner {
 		this.numPartitions = numPartitions;
 	}
 	
-	public LoadBalancer(int numPartitions, Broadcast<SpatioTextualJoin> broadcastStj) {
+	public LoadBalancer(int numPartitions, Broadcast<? extends Query> broadcastQuery) {
 		super();
 		this.numPartitions = numPartitions;
-		SpatioTextualJoin stj = broadcastStj.getValue();
-		assignDataToReducer(stj.getBins());
+		Query query = broadcastQuery.getValue();
+		assignDataToReducer(query.getBins());
 	}
 	
 	public LoadBalancer(int numPartitions, HashMap<Integer, Integer> bins) {
@@ -79,7 +81,7 @@ public class LoadBalancer extends Partitioner {
 		return false;
 	}
 	
-	private HashMap<Integer, Integer> sortBins(Map<Integer, Integer> bins)
+	public HashMap<Integer, Integer> sortBins(Map<Integer, Integer> bins)
 	{
 	    List<Integer> mapKeys = new ArrayList<Integer>(bins.keySet());
 	    List<Integer> mapValues = new ArrayList<Integer>(bins.values());
@@ -93,7 +95,7 @@ public class LoadBalancer extends Partitioner {
 	    return sortedMap;
 	}
 	
-	private Integer minLoadsSizes(){
+	public Integer minLoadsSizes(){		
 		int min = Integer.MAX_VALUE;
 		Integer minKey = null;
 		for (Integer key : loadsSizes.keySet()) {
@@ -103,6 +105,26 @@ public class LoadBalancer extends Partitioner {
 			}
 		}
 		return minKey;
+	}
+	
+	public Integer maxLoadsSizes(){
+		int max = Integer.MIN_VALUE;
+		Integer maxKey = null;
+		for (Integer key : loadsSizes.keySet()) {
+			if (loadsSizes.get(key).compareTo(max) > 0) {
+				max = loadsSizes.get(key);
+				maxKey = key;
+			}
+		}
+		return maxKey;
+	}
+	
+	public double meanLoadsSizes(){
+		double mean = 0;
+		for (Integer key : loadsSizes.keySet()) {
+			mean += loadsSizes.get(key);
+		}
+		return mean /= loadsSizes.size();
 	}
 	
 	public static void main(String[] args) {
@@ -121,7 +143,10 @@ public class LoadBalancer extends Partitioner {
 			System.out.println("Id: " + p.intValue() + " is assigned to: " + lb.loads.get(p));
 		}
 		
-		for (Integer p : lb.loadsSizes.keySet()) {
+		System.out.println(lb.loadsSizes.get(lb.loadsSizes.keySet().toArray()[0]));
+		System.out.println(lb.loadsSizes.get(lb.loadsSizes.keySet().toArray()[lb.loadsSizes.size() - 1]));
+		
+		for (Integer p : lb.sortBins(lb.loadsSizes).keySet()) {
 			System.out.println("Partition with id: " + p.intValue() + " contains " + lb.loadsSizes.get(p) + " cells");
 		}
 	}

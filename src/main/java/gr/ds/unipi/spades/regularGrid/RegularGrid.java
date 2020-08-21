@@ -2,6 +2,11 @@ package gr.ds.unipi.spades.regularGrid;
 
 import java.util.ArrayList;
 
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.broadcast.Broadcast;
+
+import gr.ds.unipi.spades.geometry.DataObject;
 import gr.ds.unipi.spades.geometry.Point;
 import scala.Tuple2;
 
@@ -292,6 +297,21 @@ public class RegularGrid {
 		
 		return pairs;
 	}
+	
+	public static JavaPairRDD<Integer, Point> assignPointsToCells(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
+			double radius) {
+		return points.flatMapToPair(point -> {
+        	// Get broadcasted values 
+        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
+        	if (point.getClass() == DataObject.class) {
+        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellIterator(point);
+        		return result.iterator();
+        	} else {
+        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
+            	return result.iterator();
+        	}            	
+        });
+    }
 	
 	private int getRowIndex(Point point) {
 		int i = (int) Math.floor(vSectors * (point.getY() - minY) / (maxY - minY));
