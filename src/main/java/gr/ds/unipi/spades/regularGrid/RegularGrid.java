@@ -2,11 +2,7 @@ package gr.ds.unipi.spades.regularGrid;
 
 import java.util.ArrayList;
 
-import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.broadcast.Broadcast;
-
-import gr.ds.unipi.spades.geometry.DataObject;
+import gr.ds.unipi.spades.geometry.FeatureObject;
 import gr.ds.unipi.spades.geometry.Point;
 import scala.Tuple2;
 
@@ -91,71 +87,71 @@ public class RegularGrid {
 		}
 	}
 	
-	public ArrayList<Tuple2<Integer, Point>> assignToCellIterator(Point point) {
+	public ArrayList<Tuple2<Integer, FeatureObject>> assignToCellIterator(FeatureObject point) {
 		int j = getColumnIndex(point);
 		int i = getRowIndex(point);
 		
-		ArrayList<Tuple2<Integer, Point>> pair = new ArrayList<Tuple2<Integer, Point>>();
-    	pair.add(new Tuple2<Integer, Point>(cells[i][j].getId(), point));
+		ArrayList<Tuple2<Integer, FeatureObject>> pair = new ArrayList<Tuple2<Integer, FeatureObject>>();
+    	pair.add(new Tuple2<Integer, FeatureObject>(cells[i][j].getId(), point));
     	return pair;
 	}
 	
-	public ArrayList<Tuple2<Integer, Point>> assignToCellAndDuplicate(Point point, double radius) {
+	public ArrayList<Tuple2<Integer, FeatureObject>> assignToCellAndDuplicate(FeatureObject point, double radius) {
 		int j = getColumnIndex(point);
 		int i = getRowIndex(point);		
-		ArrayList<Tuple2<Integer, Point>> pairs = new ArrayList<Tuple2<Integer, Point>>();
+		ArrayList<Tuple2<Integer, FeatureObject>> pairs = new ArrayList<Tuple2<Integer, FeatureObject>>();
 		
-		pairs.add(new Tuple2<Integer, Point>(cells[i][j].getId(), point));
+		pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j].getId(), point));
 		
 		if (i == 0 && j == 0) {
 			if (cells[i + 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 			}
 			
 			if (cells[i][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j + 1].getId(), point));
 			}
 			return pairs;
 		}
 		
 		if (i == 0 && j == cells[0].length - 1) {
 			if (cells[i + 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 			}
 			
 			if (cells[i][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j - 1].getId(), point));
 			}
 			return pairs;
 		}
 		
 		if (i == 0) {
 			if (cells[i][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 			}
 			
 			if (cells[i][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j - 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 			}
 			
 			if (cells[i + 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j + 1].getId(), point));
 			}
 			return pairs;
 		}
@@ -164,76 +160,76 @@ public class RegularGrid {
 		
 		if (i == cells.length - 1 && j == 0) {
 			if (cells[i - 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 			}
 			
 			if (cells[i][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 			}
 			
 			if (cells[i - 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j + 1].getId(), point));
 			}
 			return pairs;
 		}
 		
 		if (i == cells.length - 1 && j == cells[0].length - 1) {			
 			if (cells[i - 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 			}
 			
 			if (cells[i][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 			}
 			
 			if (cells[i - 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j - 1].getId(), point));
 			}
 			return pairs;
 		}
 		
 		if (i == cells.length - 1) {
 			if (cells[i][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 			}
 			
 			if (cells[i][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 			}
 			
 			if (cells[i - 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j - 1].getId(), point));
 			}
 			
 			if (cells[i - 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 			}
 			
 			if (cells[i - 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j + 1].getId(), point));
 			}
 			return pairs;
 		}
 		
 		if (j == 0) {
 			if (cells[i + 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 			}
 			
 			if (cells[i - 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 			}
 			
 			if (cells[i - 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j + 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j + 1].getId(), point));
 			}
 			
 			if (cells[i][j + 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 			}
 			
 			return pairs;
@@ -241,77 +237,62 @@ public class RegularGrid {
 		
 		if (j == cells[0].length - 1) {
 			if (cells[i + 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 			}
 			
 			if (cells[i - 1][j].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 			}
 			
 			if (cells[i - 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j - 1].getId(), point));
 			}
 			
 			if (cells[i + 1][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j - 1].getId(), point));
 			}
 			
 			if (cells[i][j - 1].isInDistance(point, radius)) {
-				pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+				pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 			}
 			
 			return pairs;
 		}
 		
 		if (cells[i + 1][j].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j].getId(), point));
 		}
 		
 		if (cells[i - 1][j].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j].getId(), point));
 		}
 		
 		if (cells[i - 1][j - 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j - 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j - 1].getId(), point));
 		}
 		
 		if (cells[i + 1][j - 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j - 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j - 1].getId(), point));
 		}
 		
 		if (cells[i][j - 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i][j - 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j - 1].getId(), point));
 		}
 		
 		if (cells[i][j + 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i][j + 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i][j + 1].getId(), point));
 		}
 		
 		if (cells[i - 1][j + 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i - 1][j + 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i - 1][j + 1].getId(), point));
 		}
 		
 		if (cells[i + 1][j + 1].isInDistance(point, radius)) {
-			pairs.add(new Tuple2<Integer, Point>(cells[i + 1][j + 1].getId(), point));
+			pairs.add(new Tuple2<Integer, FeatureObject>(cells[i + 1][j + 1].getId(), point));
 		}
 		
 		return pairs;
 	}
-	
-	public static JavaPairRDD<Integer, Point> assignPointsToCells(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
-			double radius) {
-		return points.flatMapToPair(point -> {
-        	// Get broadcasted values 
-        	RegularGrid grid = (RegularGrid) broadcastSpatialIndex.getValue();
-        	if (point.getClass() == DataObject.class) {
-        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellIterator(point);
-        		return result.iterator();
-        	} else {
-        		ArrayList<Tuple2<Integer, Point>> result = grid.assignToCellAndDuplicate(point, radius);
-            	return result.iterator();
-        	}            	
-        });
-    }
 	
 	private int getRowIndex(Point point) {
 		int i = (int) Math.floor(vSectors * (point.getY() - minY) / (maxY - minY));

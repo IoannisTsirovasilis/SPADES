@@ -71,36 +71,6 @@ public class QuadTree {
         insertPoint(root, point, radius);
     }
     
-    public static JavaPairRDD<Integer, Point> assignPointsToNodes(JavaRDD<Point> points, Broadcast<? extends Object> broadcastSpatialIndex, 
-			double radius) {
-    	return points.flatMapToPair(point -> {
-        	// Get broadcasted values 
-        	QuadTree qt = (QuadTree) broadcastSpatialIndex.getValue();
-        	if (point.getClass() == DataObject.class) {
-        		DataObject dataObject = (DataObject) point;
-        		ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeIterator(qt.getRoot(), dataObject);
-//        		stj.incrementBinsKey(result.get(0)._1);
-        		return result.iterator();
-        	} else {
-        		FeatureObject featureObject = (FeatureObject) point;
-
-				// else construct square around point with size length "radius" and center "point"   
-            	// 0, 90, 180, 270 represents navigation bearing
-            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 0).getY();
-            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 180).getY();
-            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 90).getX();
-            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(featureObject, radius, 270).getX();
-            	
-            	featureObject.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
-            	
-            	// Assign point to every leaf that intersects with the square
-            	ArrayList<Tuple2<Integer, Point>> result = qt.assignToLeafNodeAndDuplicate(qt.getRoot(), featureObject);
-
-            	return result.iterator();
-        	}
-        });	
-	}
-    
     // Special case to prevent leaf creation with side length less than a given number (e.g. 5*r)
     private void insertPoint(Node node, Point point, double radius) {
         Node leafNode = determineLeafNodeForInsertion(node, point);
@@ -168,10 +138,10 @@ public class QuadTree {
     
     // Recursive method for assigning a point to a leaf and 
     // to all the leaves that intersect with the square around the point
-    public ArrayList<Tuple2<Integer, Point>> assignToLeafNodeAndDuplicate(Node node, FeatureObject featureObject) {
+    public ArrayList<Tuple2<Integer, FeatureObject>> assignToLeafNodeAndDuplicate(Node node, FeatureObject featureObject) {
     	
     	// Array list containing the pairs (leaf id, point)
-    	ArrayList<Tuple2<Integer, Point>> pairs = new ArrayList<Tuple2<Integer, Point>>();
+    	ArrayList<Tuple2<Integer, FeatureObject>> pairs = new ArrayList<Tuple2<Integer, FeatureObject>>();
     	
     	// If it's NOT a leaf node, then explore children
     	if (node.hasChildrenQuadrants()) {
@@ -188,7 +158,7 @@ public class QuadTree {
     	// else if it is a leaf node
         } else {
         	// assign point to this leaf
-        	pairs.add(new Tuple2<Integer, Point>(node.getId(), featureObject));
+        	pairs.add(new Tuple2<Integer, FeatureObject>(node.getId(), featureObject));
         }
     	
     	return pairs;
@@ -197,7 +167,7 @@ public class QuadTree {
     // Recursive method for assigning a point to a leaf
     // This method could simply return a Tuple2<Integer, Point>, 
     // but Sparks' flatMapToPair demands an iterator
-    public ArrayList<Tuple2<Integer, Point>> assignToLeafNodeIterator(Node node, Point point) {
+    public ArrayList<Tuple2<Integer, FeatureObject>> assignToLeafNodeIterator(Node node, FeatureObject point) {
     	if (node.hasChildrenQuadrants()) {
     		for (Node child : node.getChildren()) {
     			if (child.contains(point)) {
@@ -206,8 +176,8 @@ public class QuadTree {
     		}
         } 
     	
-    	ArrayList<Tuple2<Integer, Point>> pair = new ArrayList<Tuple2<Integer, Point>>();
-    	pair.add(new Tuple2<Integer, Point>(node.getId(), point));
+    	ArrayList<Tuple2<Integer, FeatureObject>> pair = new ArrayList<Tuple2<Integer, FeatureObject>>();
+    	pair.add(new Tuple2<Integer, FeatureObject>(node.getId(), point));
     	node.increaseNumberOfAssignedPoints();
     	return pair;
     }

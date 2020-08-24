@@ -1,5 +1,6 @@
 package gr.ds.unipi.spades;
 
+import java.awt.Toolkit;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -92,7 +93,7 @@ public class SpatioTextualJoinApp {
     	double minY = -12;
     	double maxX = 15;
     	double maxY = 8;
-    	int inputSize = 1_000_000;
+    	int inputSize = 250_000;
     	double samplePercentage = 0.01;
     	int samplePointsPerLeaf = (int) (inputSize * samplePercentage) / numberOfWorkers;    	
     	int hSectors = 100;
@@ -100,7 +101,7 @@ public class SpatioTextualJoinApp {
     	int numberOfRunsPerFileSet = 6;
     	double radius = 2;
     	
-    	FileWriter csvWriter = new FileWriter(localFilePath + "spatiotextual_250k.csv");    	
+    	FileWriter csvWriter = new FileWriter(localFilePath + "spatiotextual_250k_3.csv");    	
     	addLabels(csvWriter);
     	
     	double toSecondsFactor = Math.pow(10, 9);
@@ -117,6 +118,7 @@ public class SpatioTextualJoinApp {
     	// Iterate through experiment setups
     	for (int i = 0; i < numberOfRunsPerFileSet; i++) {
     		try {
+    			System.out.println((i + 1) + " iteration...");
     			stj.resetBins();
         		if (i == 0) {
         			radius = 2;
@@ -125,74 +127,82 @@ public class SpatioTextualJoinApp {
         		}
         		
         		// Map lines to points
-            	JavaRDD<Point> points = stj.mapToPoints(file, broadcastStj);
+            	JavaRDD<FeatureObject> points = stj.mapToPoints(file, broadcastStj);
         		
         		// ------------ REGULAR GRID ---------------
             	
+            	System.out.println("Creating regular grid...");
             	startTime = System.nanoTime();
             	// Create regular grid (Global Indexing)
             	RegularGrid grid = stj.createRegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
             	indexCreationTime = System.nanoTime() - startTime;  
-            	
+            	System.out.println("Regular grid created...");
             	// Broadcast regular grid
             	Broadcast<RegularGrid> broadcastRegularGrid = sc.broadcast(grid);
             	
             	// Map points to cells
-            	JavaPairRDD<Integer, Point> pairs = stj.map(points, broadcastRegularGrid, radius);
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastRegularGrid, radius);
             	
+            	System.out.println("Counting duplicates (RG)...");
             	// Calculate duplicates
             	duplicates = pairs.values().count() - inputSize; 
-            	
+            	System.out.println("Duplicates counted (RG)...");
             	// Group By Key
-            	JavaPairRDD<Integer, List<Point>> groupedPairs = pairs.groupByKey().mapValues(iter -> {
-                	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey().mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	
+            	System.out.println("Counting partitions (RG)");
             	partitions = groupedPairs.keys().count();
-            	
+            	System.out.println("Partitions counted (RG)...");
+            	System.out.println("Counting result pairs (RG)");
             	startTime = System.nanoTime();
             	outPairs = stj.reduce(groupedPairs, radius).count();            	
             	resultTime = System.nanoTime() - startTime;
             	csvWriter.append("Regular Grid," + inputSize + ",," + radius + "," + hSectors + "x" + vSectors + ",," + 
-            			partitions + "," + duplicates + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
+            			partitions + "," + duplicates + "," + outPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
         		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
             	samplePercentage = 0.01;
             	samplePointsPerLeaf = 1;
             	sampleSize = (int) (samplePercentage * inputSize);
+            	System.out.println("Creating quad tree...");
         		startTime = System.nanoTime();
             	// Create quad tree (Global Indexing)
             	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
             	indexCreationTime = System.nanoTime() - startTime;
-            	
+            	System.out.println("Quad tree created...");
             	// Broadcast quad tree
             	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
             	
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
             	
+            	System.out.println("Counting duplicates (QT)...");
             	// Calculate duplicates
             	duplicates = pairs.values().count() - inputSize; 
-            	
+            	System.out.println("Duplicates counted (QT)...");
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
-                	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
             	
+            	System.out.println("Counting partitions (QT)...");
             	partitions = groupedPairs.keys().count();
-            	
+            	System.out.println("Partitions counted (QT)...");
+            	System.out.println("Counting result pairs (QT)...");
             	startTime = System.nanoTime();
-            	tempPairs = stj.reduceQuadTreeMBRCheck(groupedPairs, radius).count();    
+            	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
         		assert outPairs == tempPairs;
-        		
+        		System.out.println("OutPairs: " + outPairs);
+        		System.out.println("TempPairs: " + tempPairs);
             	csvWriter.append("Quad Tree," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
-            			partitions + "," + duplicates + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
+            			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
             	// --------------------- END QUAD TREE MBR CHECK ---------------------
             	
@@ -201,44 +211,48 @@ public class SpatioTextualJoinApp {
             	samplePercentage = 0.01;
             	sampleSize = (int) (samplePercentage * inputSize);
             	samplePointsPerLeaf = (int) (sampleSize / (5 * numberOfWorkers));
-            	
+            	System.out.println("Creating quad tree (LPT)...");
             	startTime = System.nanoTime();
             	// Create quad tree (Global Indexing)
             	qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
-            	
+            	System.out.println("Quad tree created (LPT)...");
             	indexCreationTime = System.nanoTime() - startTime;
+            	
+            	// Broadcast quad tree
+            	broadcastQuadTree = sc.broadcast(qt);
             	
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
-            	
+            	System.out.println("Counting duplicates (LPT)...");
             	// Calculate duplicates
             	duplicates = pairs.values().count() - inputSize; 
-            	
+            	System.out.println("Duplicates counted (LPT)...");
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
-                	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	
+            	System.out.println("Counting partitions (LPT)...");
             	partitions = groupedPairs.keys().count();
-
+            	System.out.println("Partitions counted (LPT)...");
+            	System.out.println("Counting result pairs (LPT)...");
             	lb.assignDataToReducer(stj.getBins());
             	groupedPairs = groupedPairs.partitionBy(lb);
             	
             	startTime = System.nanoTime();
-            	tempPairs = stj.reduceQuadTreeMBRCheck(groupedPairs, radius).count();    
+            	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
         		assert outPairs == tempPairs;
             	
             	csvWriter.append("LPT," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
-            			partitions + "," + duplicates + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
+            			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
             	// --------------------- END QUAD TREE NORMAL ---------------------
             	
             	// --------------------- QUAD TREE MBR CHECK WITH POINTS PER LEAF PROPORTIONAL TO NUMBER OF WORKERS (GeoSpark) ---------------------
-            	
+            	System.out.println("Creating quad tree (GS)...");
             	startTime = System.nanoTime();
             	// Create quad tree (Global Indexing)
             	samplePercentage = 0.01;
@@ -246,34 +260,35 @@ public class SpatioTextualJoinApp {
             	samplePointsPerLeaf =  (int) (sampleSize / numberOfWorkers);
             	qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
             	indexCreationTime = System.nanoTime() - startTime;  
-            	
+            	System.out.println("Quad tree created (GS)...");
             	// Broadcast quad tree
             	broadcastQuadTree = sc.broadcast(qt);
             	
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
-            	
+            	System.out.println("Counting duplicates (GS)...");
             	// Calculate duplicates
             	duplicates = pairs.values().count() - inputSize; 
-            	
+            	System.out.println("Duplicates counted (GS)...");
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
-                	List<Point> pp = new ArrayList<Point>((Collection<? extends Point>) iter);
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	
+            	System.out.println("Counting partitions (GS)...");
             	partitions = groupedPairs.keys().count();
-            	
+            	System.out.println("Partitions counted (GS)...");
+            	System.out.println("Counting result pairs (GS)...");
             	startTime = System.nanoTime();
-            	tempPairs = stj.reduceQuadTreeMBRCheck(groupedPairs, radius).count();    
+            	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
         		assert outPairs == tempPairs;
         		
         		
             	csvWriter.append("GeoSpark," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
-            			partitions + "," + duplicates + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
+            			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
             	// --------------------- END QUAD TREE MBR CHECK WITH POINTS PER LEAF PROPORTIONAL TO NUMBER OF WORKERS ---------------------
             	           	
@@ -282,7 +297,9 @@ public class SpatioTextualJoinApp {
     			errors.write(i + "," + outPairs + "," + tempPairs + "\n");
     			errors.flush();
     	    	errors.close();
-    		}        	
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep();
+    		}
     	}
     	
     	csvWriter.flush();
@@ -320,6 +337,6 @@ public class SpatioTextualJoinApp {
     } 
     
     private static void addLabels(FileWriter fw) throws IOException {
-    	fw.append("Structure,Input Size,Sample Size,Radius,Grid Size,Sample Input Per Leaf,Partitions,Duplicates,Index Creation Time (s),Result Set Time (s)\n");
+    	fw.append("Structure,Input Size,Sample Size,Radius,Grid Size,Sample Input Per Leaf,Partitions,Duplicates,Output Pairs,Index Creation Time (s),Result Set Time (s)\n");
     }
 }
