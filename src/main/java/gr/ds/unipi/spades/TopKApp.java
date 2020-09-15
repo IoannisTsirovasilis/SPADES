@@ -126,7 +126,7 @@ public class TopKApp
         		} else {
         			keywords = getRandomElements(categories, 3);
         		}
-        		
+                
         		// Map lines to points
             	JavaRDD<Point> points = topK.mapToPoints(file, broadcastTopK, keywords);
         		

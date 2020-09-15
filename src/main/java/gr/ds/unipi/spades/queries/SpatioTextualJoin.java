@@ -70,6 +70,8 @@ public class SpatioTextualJoin extends Query {
         	quadTree.insertPoint(p);
         }   
         
+        traverse(quadTree.getRoot());
+        
         return quadTree;
 	}
 	
@@ -95,7 +97,10 @@ public class SpatioTextualJoin extends Query {
 	}
 	
 	private void traverse(Node node) {
-		if (node == null) return;
+		if (node == null) {
+			System.out.println("Null node");
+			return;
+		}
 		if (node.hasChildrenQuadrants()) {
 			Node[] children = node.getChildren();
 			for (int i = 0; i < children.length; i++) {

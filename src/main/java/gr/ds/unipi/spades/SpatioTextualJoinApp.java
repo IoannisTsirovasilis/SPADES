@@ -10,12 +10,15 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.storage.StorageLevel;
+import org.apache.spark.util.LongAccumulator;
 
 import gr.ds.unipi.spades.geometry.DataObject;
 import gr.ds.unipi.spades.geometry.FeatureObject;
@@ -23,16 +26,14 @@ import gr.ds.unipi.spades.geometry.Point;
 import gr.ds.unipi.spades.quadTree.Node;
 import gr.ds.unipi.spades.quadTree.QuadTree;
 import gr.ds.unipi.spades.queries.SpatioTextualJoin;
-import gr.ds.unipi.spades.queries.TopK;
 import gr.ds.unipi.spades.regularGrid.RegularGrid;
 import gr.ds.unipi.spades.util.MathUtils;
-import scala.Tuple2;
 
 public class SpatioTextualJoinApp {
 	public static void main(String[] args) throws IOException
     {
     	// Initialize spark context
-    	SparkConf conf = new SparkConf().setMaster("local").setAppName("Test Spark");
+    	SparkConf conf = new SparkConf().setAppName("General Spatial Join");
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
         conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
         	Point[].class, Node[].class, MathUtils.class, SpatioTextualJoin.class });
@@ -64,6 +65,7 @@ public class SpatioTextualJoinApp {
     	String file1;
     	String file2;
     	String localFilePath;
+    	int inputSize = 250_000;
     	if (args.length == 0) {
     		FILE_PATH = "C:/Users/user/OneDrive/Documents/SPADES Project/Datasets/";
         	file1 = "skewedL_250K.txt";
@@ -74,34 +76,27 @@ public class SpatioTextualJoinApp {
         	file1 = args[1];
         	file2 = args[2];
         	localFilePath = args[3];	
+        	numberOfWorkers = Integer.parseInt(args[4]);
+        	inputSize = Integer.parseInt(args[5]);
     	}
     	
     	String pathToCsv = FILE_PATH + file1 + "," + FILE_PATH + file2;
     	JavaRDD<String> file = sc.textFile(pathToCsv);
-    	
-    	// Read feature objects' categories
-    	BufferedReader csvReader = new BufferedReader(new FileReader(localFilePath + "categories.txt"));
-    	String row;
-    	ArrayList<String> categories = new ArrayList<String>();
-		while ((row = csvReader.readLine()) != null) {
-			categories.add(row.trim());
-    	}
-    	csvReader.close();
     	
     	// Quad tree and query parameters
     	double minX = -15;
     	double minY = -12;
     	double maxX = 15;
     	double maxY = 8;
-    	int inputSize = 250_000;
-    	double samplePercentage = 0.01;
+    	
+    	double samplePercentage = 0.1;
     	int samplePointsPerLeaf = (int) (inputSize * samplePercentage) / numberOfWorkers;    	
     	int hSectors = 100;
     	int vSectors = 100;    	   	 
     	int numberOfRunsPerFileSet = 6;
     	double radius = 2;
     	
-    	FileWriter csvWriter = new FileWriter(localFilePath + "spatiotextual_250k_3.csv");    	
+    	FileWriter csvWriter = new FileWriter(localFilePath + "spatiotextual.csv");    	
     	addLabels(csvWriter);
     	
     	double toSecondsFactor = Math.pow(10, 9);
@@ -124,8 +119,7 @@ public class SpatioTextualJoinApp {
         			radius = 2;
         		} else if (i == 3) {
         			radius = 4;
-        		}
-        		
+        		}  	
         		// Map lines to points
             	JavaRDD<FeatureObject> points = stj.mapToPoints(file, broadcastStj);
         		
@@ -141,27 +135,34 @@ public class SpatioTextualJoinApp {
             	Broadcast<RegularGrid> broadcastRegularGrid = sc.broadcast(grid);
             	
             	// Map points to cells
-            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastRegularGrid, radius);
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastRegularGrid, radius);            	
             	
-            	System.out.println("Counting duplicates (RG)...");
-            	// Calculate duplicates
-            	duplicates = pairs.values().count() - inputSize; 
-            	System.out.println("Duplicates counted (RG)...");
             	// Group By Key
             	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey().mapValues(iter -> {
                 	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	System.out.println("Counting partitions (RG)");
+            	
+            	// Calculate duplicates
+            	System.out.println("Counting duplicates (RG)...");
+            	duplicates = pairs.count() - inputSize;
+            	System.out.println("Duplicates counted (RG)...");
+            	
+            	System.out.println("Counting partitions (RG)");            	
             	partitions = groupedPairs.keys().count();
             	System.out.println("Partitions counted (RG)...");
+            	
             	System.out.println("Counting result pairs (RG)");
             	startTime = System.nanoTime();
             	outPairs = stj.reduce(groupedPairs, radius).count();            	
             	resultTime = System.nanoTime() - startTime;
+            	
+            	System.out.println("Counting duplicates (RG)...");
+            	
+            	
             	csvWriter.append("Regular Grid," + inputSize + ",," + radius + "," + hSectors + "x" + vSectors + ",," + 
-            			partitions + "," + duplicates + "," + outPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
+        				partitions + "," + duplicates + "," + outPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
         		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
             	samplePercentage = 0.01;
@@ -179,10 +180,7 @@ public class SpatioTextualJoinApp {
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
             	
-            	System.out.println("Counting duplicates (QT)...");
-            	// Calculate duplicates
-            	duplicates = pairs.values().count() - inputSize; 
-            	System.out.println("Duplicates counted (QT)...");
+            	
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
                 	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
@@ -190,17 +188,23 @@ public class SpatioTextualJoinApp {
                 	return pp;
                 });	// group by leaf id and sort values based on tag
             	
-            	System.out.println("Counting partitions (QT)...");
-            	partitions = groupedPairs.keys().count();
-            	System.out.println("Partitions counted (QT)...");
+            	
             	System.out.println("Counting result pairs (QT)...");
             	startTime = System.nanoTime();
             	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
-        		assert outPairs == tempPairs;
-        		System.out.println("OutPairs: " + outPairs);
-        		System.out.println("TempPairs: " + tempPairs);
+        		//assert outPairs == tempPairs;
+        		
+        		System.out.println("Counting duplicates (QT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (QT)...");
+            	
+            	System.out.println("Counting partitions (QT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (QT)...");
+        		
             	csvWriter.append("Quad Tree," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
             			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
@@ -223,19 +227,14 @@ public class SpatioTextualJoinApp {
             	
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
-            	System.out.println("Counting duplicates (LPT)...");
-            	// Calculate duplicates
-            	duplicates = pairs.values().count() - inputSize; 
-            	System.out.println("Duplicates counted (LPT)...");
+            	
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
                 	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	System.out.println("Counting partitions (LPT)...");
-            	partitions = groupedPairs.keys().count();
-            	System.out.println("Partitions counted (LPT)...");
+            	
             	System.out.println("Counting result pairs (LPT)...");
             	lb.assignDataToReducer(stj.getBins());
             	groupedPairs = groupedPairs.partitionBy(lb);
@@ -244,8 +243,17 @@ public class SpatioTextualJoinApp {
             	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
-        		assert outPairs == tempPairs;
+        		//assert outPairs == tempPairs;
             	
+        		System.out.println("Counting duplicates (LPT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (LPT)...");
+            	
+            	System.out.println("Counting partitions (LPT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (LPT)...");
+        		
             	csvWriter.append("LPT," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
             			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
             	
@@ -266,26 +274,29 @@ public class SpatioTextualJoinApp {
             	
             	// Map points to cells
             	pairs = stj.map(points, broadcastQuadTree, radius);
-            	System.out.println("Counting duplicates (GS)...");
-            	// Calculate duplicates
-            	duplicates = pairs.values().count() - inputSize; 
-            	System.out.println("Duplicates counted (GS)...");
+            	
             	// Group By Key
             	groupedPairs = pairs.groupByKey().mapValues(iter -> {
                 	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                 	pp.sort(DataObject.Comparator);
                 	return pp;
                 });	// group by leaf id and sort values based on tag
-            	System.out.println("Counting partitions (GS)...");
-            	partitions = groupedPairs.keys().count();
-            	System.out.println("Partitions counted (GS)...");
+            	
             	System.out.println("Counting result pairs (GS)...");
             	startTime = System.nanoTime();
             	tempPairs = stj.reduce(groupedPairs, radius).count();    
         		resultTime = System.nanoTime() - startTime;  
         		
-        		assert outPairs == tempPairs;
+        		//assert outPairs == tempPairs;
         		
+        		System.out.println("Counting duplicates (GS)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (GS)...");
+            	
+            	System.out.println("Counting partitions (GS)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (GS)...");
         		
             	csvWriter.append("GeoSpark," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
             			partitions + "," + duplicates + "," + tempPairs + "," + indexCreationTime / toSecondsFactor + "," + resultTime / toSecondsFactor + "\n");
@@ -303,7 +314,7 @@ public class SpatioTextualJoinApp {
     	}
     	
     	csvWriter.flush();
-    	csvWriter.close();
+		csvWriter.close();
     	sc.close();
     }
     

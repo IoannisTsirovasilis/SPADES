@@ -6,7 +6,7 @@ import gr.ds.unipi.spades.geometry.Rectangle;
 public class Node extends Rectangle {	 
     private int id;
     private static int idCounter = 0;
-    private int numberOfContainedPoints;
+    private int numberOfContainedPoints = 0;
     private boolean hasChildrenQuadrants = false;
     private Point[] points;
     private int numberOfAssignedPoints = 0;

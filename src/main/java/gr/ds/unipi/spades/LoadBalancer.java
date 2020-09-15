@@ -19,8 +19,8 @@ public class LoadBalancer extends Partitioner {
 	 */
 	private static final long serialVersionUID = -2828039002390466153L;
 	private int numPartitions;
-	public HashMap<Integer, Integer> loads; 
-	public HashMap<Integer, Integer> loadsSizes;
+	public HashMap<Integer, Integer> loads = new HashMap<Integer, Integer>(); 
+	public HashMap<Integer, Integer> loadsSizes = new HashMap<Integer, Integer>();
 	
 	public LoadBalancer(int numPartitions) {
 		super();
@@ -42,9 +42,8 @@ public class LoadBalancer extends Partitioner {
 	
 	public void assignDataToReducer(HashMap<Integer, Integer> bins) 
 	{
-		loads = new HashMap<Integer, Integer>();
-		loadsSizes = new HashMap<Integer, Integer>();
-		bins = sortBins(bins);
+		loads.clear();
+		loadsSizes.clear();
 		
 	    int i = 0 ;
 	    
@@ -124,7 +123,16 @@ public class LoadBalancer extends Partitioner {
 		for (Integer key : loadsSizes.keySet()) {
 			mean += loadsSizes.get(key);
 		}
-		return mean /= loadsSizes.size();
+		return mean / loadsSizes.size();
+	}
+	
+	public double stdLoadsSizes(){
+		double mean = meanLoadsSizes();
+		double std = 0;
+		for (Integer key : loadsSizes.keySet()) {
+			std += Math.pow(loadsSizes.get(key) - mean, 2);
+		}
+		return Math.sqrt(std / loadsSizes.size());
 	}
 	
 	public static void main(String[] args) {

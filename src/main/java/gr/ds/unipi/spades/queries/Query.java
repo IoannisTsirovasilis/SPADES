@@ -11,7 +11,7 @@ public class Query {
 	protected int quadTreeDuplications;
 	protected int regularGridDuplications;
 	protected int mbrCount;
-	protected HashMap<Integer, Integer> bins;
+	protected HashMap<Integer, Integer> bins = new HashMap<Integer, Integer>();
 	
 	// File 1 Fields
 	protected int file1LonIndex, file1LatIndex;
@@ -40,7 +40,7 @@ public class Query {
 	}
 	
 	public void resetBins() {
-		bins = new HashMap<Integer, Integer>();
+		bins.clear();
 	}
 	
 	public void insertToBins(Integer key, Integer value) {
