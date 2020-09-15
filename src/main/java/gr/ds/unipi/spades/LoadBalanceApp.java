@@ -27,25 +27,27 @@ import gr.ds.unipi.spades.util.MathUtils;
 import scala.Tuple2;
 
 public class LoadBalanceApp {
-	long startTime;
-	long indexCreationTime;
-	long partitions;
-	static int numberOfWorkers = 10	;
-	double duplicates;
-	int inputSize = 250_000;
-	int[] workers;
-	int rgBalanceIndex = 0;
+//	long startTime;
+//	long indexCreationTime;
+//	long partitions;
+//	static int numberOfWorkers = 10	;
+//	double duplicates;
+//	int inputSize = 250_000;
+//	int[] workers;
+//	int rgBalanceIndex = 0;
 	
 	public static void main(String[] args) throws IOException
     {
-		LoadBalanceApp app = new LoadBalanceApp();
     	// Initialize spark context
-    	SparkConf conf = new SparkConf().setMaster("local[" + numberOfWorkers + "]").setAppName("General Spatial Join");
+		int numberOfWorkers = 10;
+		int inputSize = 250_000;
+		SparkConf conf = new SparkConf().setMaster("local[" + numberOfWorkers + "]").setAppName("General Spatial Join");
     	conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer");
     	conf.registerKryoClasses(new Class<?>[] {QuadTree.class, Node.class, Point.class, 
         	Point[].class, Node[].class, MathUtils.class, SpatioTextualJoin.class, LoadBalanceApp.class });
         JavaSparkContext sc = new JavaSparkContext(conf);
-        
+		
+		
         // Constant parameters
         
         int file1LonIndex = 1; int file1LatIndex = 2; int file1Tag = 1;
@@ -65,8 +67,7 @@ public class LoadBalanceApp {
     			file2LonIndex, file2LatIndex, file2Tag, keywordsIndex, keywordsSeparator,
     			separator, tagIndex);
     	
-    	// Broadcast spatiotextualjoin object
-    	Broadcast<SpatioTextualJoin> broadcastStj = sc.broadcast(stj);
+    	
     	
     	// Read files
     	String FILE_PATH;
@@ -84,11 +85,11 @@ public class LoadBalanceApp {
         	file2 = args[2];
         	localFilePath = args[3];	
         	numberOfWorkers = Integer.parseInt(args[4]);
-        	app.inputSize = Integer.parseInt(args[5]);
+        	inputSize = Integer.parseInt(args[5]);
     	}
     	
     	String pathToCsv = FILE_PATH + file1 + "," + FILE_PATH + file2;
-    	JavaRDD<String> file = sc.textFile(pathToCsv);
+    	
     	
     	// Quad tree and query parameters
     	double minX = -15;
@@ -103,16 +104,20 @@ public class LoadBalanceApp {
     	FileWriter csvWriter = new FileWriter(localFilePath + "spatiotextual2.csv");    	
     	addLabels(csvWriter);
     	
-    	double toSecondsFactor = Math.pow(10, 9);
-    	long resultTime = 0;
-    	int sampleSize = (int) (samplePercentage * app.inputSize);
-    	app.workers = new int[numberOfWorkers];   
+    	//double toSecondsFactor = Math.pow(10, 9);
+    	//long resultTime = 0;
+    	int sampleSize = (int) (samplePercentage * inputSize);
+    	int[] workers = new int[numberOfWorkers];
+    	long duplicates;
+    	long partitions;
+    	int samplePointsPerLeaf;
     	// Iterate through experiment setups
     	for (int i = 0; i < numberOfRunsPerFileSet; i++) {
     		try {
     			System.out.println((i + 1) + " iteration...");
-    			
-    			stj.resetBins();
+    	        // Broadcast spatiotextualjoin object
+    	    	Broadcast<SpatioTextualJoin> broadcastStj = sc.broadcast(stj);
+    	    	JavaRDD<String> file = sc.textFile(pathToCsv);	  
         		if (i == 0) {
         			radius = 2;
         		} else if (i == 3) {
@@ -123,27 +128,208 @@ public class LoadBalanceApp {
         		JavaRDD<FeatureObject> points = stj.mapToPoints(file, broadcastStj);
         		
         		// ------------ REGULAR GRID ---------------
+        		for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	System.out.println("Creating regular grid...");
+            	long startTime = System.nanoTime();
+            	// Create regular grid (Global Indexing)
+            	int hSectors = 100;
+            	int vSectors = 100;
+            	RegularGrid grid = stj.createRegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
+            	long indexCreationTime = System.nanoTime() - startTime;  
+            	System.out.println("Regular grid created...");
+            	// Broadcast regular grid
+            	Broadcast<RegularGrid> broadcastRegularGrid = sc.broadcast(grid);
             	
-        		app.regularGridTest(minX, minY, maxX, maxY, 50, 50, radius, points, sc, stj, rr, csvWriter);
-        		app.regularGridTest(minX, minY, maxX, maxY, 100, 100, radius, points, sc, stj, rr, csvWriter);
-        		app.regularGridTest(minX, minY, maxX, maxY, 150, 150, radius, points, sc, stj, rr, csvWriter);            	
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastRegularGrid, radius);               
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey().mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
+            	Tuple2<Integer, Integer> n;
+            	Integer load;
+            	int rgBalanceIndex = 0;
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = rgBalanceIndex++ % workers.length;
+        			workers[load] +=  n._2;
+            	}
+            	
+            	// Calculate duplicates
+            	System.out.println("Counting duplicates (RG)...");
+            	duplicates = pairs.count() - inputSize;
+            	System.out.println("Duplicates counted (RG)...");
+            	
+            	System.out.println("Counting partitions (RG)");            	
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (RG)...");
+            	
+            	csvWriter.append("Regular Grid," + inputSize + ",," + radius + "," + hSectors + "x" + vSectors + ",," + 
+        				partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");            	
             	
         		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
             	
-        		app.quadTreeTest(minX, minY, maxX, maxY, samplePercentage, sampleSize, 1, radius, points, sc, stj, rr, csvWriter);
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	samplePointsPerLeaf = 1;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree...");
+        		startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	indexCreationTime = System.nanoTime() - startTime;
+            	System.out.println("Quad tree created...");
+            	rr.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	// Map points to cells
+            	pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                iterator = counts.iterator();
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = rr.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+            	
+        		System.out.println("Counting duplicates (QT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (QT)...");
+            	
+            	System.out.println("Counting partitions (QT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (QT)...");
         		
-            	// --------------------- END QUAD TREE MBR CHECK ---------------------
+            	csvWriter.append("Quad Tree," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
+        		// --------------------- END QUAD TREE MBR CHECK ---------------------
             	
             	// --------------------- QUAD TREE LPT APPROXIMATION ---------------------
             	
-            	app.lptTest(minX, minY, maxX, maxY, samplePercentage, sampleSize, radius, points, sc, stj, lb, csvWriter);
-        		
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	samplePointsPerLeaf = (int) (sampleSize / (5 * workers.length));
+            	System.out.println("Creating quad tree (LPT)...");
+            	startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	System.out.println("Quad tree created (LPT)...");
+            	indexCreationTime = System.nanoTime() - startTime;
+            	lb.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	broadcastQuadTree = sc.broadcast(qt);
+            	
+            	// Map points to cells
+            	pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                iterator = counts.iterator();
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = lb.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+
+        		System.out.println("Counting duplicates (LPT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (LPT)...");
+            	
+            	System.out.println("Counting partitions (LPT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (LPT)...");            	
+            	
+            	csvWriter.append("LPT," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
+            	
             	// --------------------- END QUAD TREE NORMAL ---------------------
             	
             	// --------------------- QUAD TREE MBR CHECK WITH POINTS PER LEAF PROPORTIONAL TO NUMBER OF WORKERS (GeoSpark) ---------------------
             	
-            	app.geosparkTest(minX, minY, maxX, maxY, samplePercentage, sampleSize, radius, points, sc, stj, rr, csvWriter);
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree (GS)...");
+            	startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	samplePointsPerLeaf = (int) (sampleSize / workers.length);
+            	qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	indexCreationTime = System.nanoTime() - startTime;  
+            	System.out.println("Quad tree created (GS)...");
+            	rr.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	broadcastQuadTree = sc.broadcast(qt);
             	
+            	// Map points to cells
+            	pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                iterator = counts.iterator();
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = rr.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+            	
+        		System.out.println("Counting duplicates (GS)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (GS)...");
+            	
+            	System.out.println("Counting partitions (GS)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (GS)...");
+        		
+            	csvWriter.append("GeoSpark," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
+            
             	// --------------------- END QUAD TREE MBR CHECK WITH POINTS PER LEAF PROPORTIONAL TO NUMBER OF WORKERS ---------------------
             	            	           	
     		} catch (AssertionError ex) {
@@ -159,7 +345,7 @@ public class LoadBalanceApp {
     	
     	csvWriter.flush();
 		csvWriter.close();
-    	sc.close();
+		sc.close();
     }
     
     // Function select an element base on index and return 
@@ -195,33 +381,35 @@ public class LoadBalanceApp {
     	fw.append("Structure,Input Size,Sample Size,Radius,Grid Size,Sample Input Per Leaf,Partitions,Duplicates,Min,Max,Mean,Std\n");
     }
     
-    private void geosparkTest(double minX, double minY, double maxX, double maxY,
+    private static void geosparkTest(double minX, double minY, double maxX, double maxY,
     		double samplePercentage, int sampleSize, double radius, JavaRDD<FeatureObject> points,
-    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter) throws IOException {
-    	for (int c = 0; c < numberOfWorkers; c++) workers[c] = 0;
+    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter,
+    		JavaPairRDD<Integer, FeatureObject> pairs, JavaPairRDD<Integer, List<FeatureObject>> groupedPairs,
+    		List<Tuple2<Integer, Integer>> counts, int[] workers, int inputSize) throws IOException {
+    	for (int c = 0; c < workers.length; c++) workers[c] = 0;
     	stj.resetBins();
     	System.out.println("Creating quad tree (GS)...");
-    	startTime = System.nanoTime();
+    	long startTime = System.nanoTime();
     	// Create quad tree (Global Indexing)
-    	int samplePointsPerLeaf = (int) (sampleSize / numberOfWorkers);
+    	int samplePointsPerLeaf = (int) (sampleSize / workers.length);
     	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
-    	indexCreationTime = System.nanoTime() - startTime;  
+    	long indexCreationTime = System.nanoTime() - startTime;  
     	System.out.println("Quad tree created (GS)...");
     	rr.assignDataToReducer(stj.getBins());
     	// Broadcast quad tree
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
     	// Map points to cells
-    	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+    	pairs = stj.map(points, broadcastQuadTree, radius);            	
     	
     	// Group By Key
-    	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+    	groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
         	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
         	pp.sort(DataObject.Comparator);
         	return pp;
         });	// group by leaf id and sort values based on tag
     	
-    	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+    	counts = groupedPairs.mapValues(iter -> {
             List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
             return pp.size();
         }).collect();     
@@ -237,11 +425,11 @@ public class LoadBalanceApp {
     	
 		System.out.println("Counting duplicates (GS)...");
     	// Calculate duplicates
-    	duplicates = pairs.values().count() - inputSize; 
+    	long duplicates = pairs.values().count() - inputSize; 
     	System.out.println("Duplicates counted (GS)...");
     	
     	System.out.println("Counting partitions (GS)...");
-    	partitions = groupedPairs.keys().count();
+    	long partitions = groupedPairs.keys().count();
     	System.out.println("Partitions counted (GS)...");
 		
     	csvWriter.append("GeoSpark," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
@@ -249,33 +437,35 @@ public class LoadBalanceApp {
 				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
     }
     
-    private void lptTest(double minX, double minY, double maxX, double maxY,
+    private static void lptTest(double minX, double minY, double maxX, double maxY,
     		double samplePercentage, int sampleSize, double radius, JavaRDD<FeatureObject> points,
-    		JavaSparkContext sc, SpatioTextualJoin stj, LoadBalancer lb, FileWriter csvWriter) throws IOException {
-    	for (int c = 0; c < numberOfWorkers; c++) workers[c] = 0;
+    		JavaSparkContext sc, SpatioTextualJoin stj, LoadBalancer lb, FileWriter csvWriter,
+    		JavaPairRDD<Integer, FeatureObject> pairs, JavaPairRDD<Integer, List<FeatureObject>> groupedPairs,
+    		List<Tuple2<Integer, Integer>> counts, int[] workers, int inputSize) throws IOException {
+    	for (int c = 0; c < workers.length; c++) workers[c] = 0;
     	stj.resetBins();
-    	int samplePointsPerLeaf = (int) (sampleSize / (5 * numberOfWorkers));
+    	int samplePointsPerLeaf = (int) (sampleSize / (5 * workers.length));
     	System.out.println("Creating quad tree (LPT)...");
-    	startTime = System.nanoTime();
+    	long startTime = System.nanoTime();
     	// Create quad tree (Global Indexing)
     	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
     	System.out.println("Quad tree created (LPT)...");
-    	indexCreationTime = System.nanoTime() - startTime;
+    	long indexCreationTime = System.nanoTime() - startTime;
     	lb.assignDataToReducer(stj.getBins());
     	// Broadcast quad tree
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	
     	// Map points to cells
-    	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+    	pairs = stj.map(points, broadcastQuadTree, radius);            	
     	
     	// Group By Key
-    	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
+    	groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
         	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
         	pp.sort(DataObject.Comparator);
         	return pp;
         });	// group by leaf id and sort values based on tag
     	
-    	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+    	counts = groupedPairs.mapValues(iter -> {
             List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
             return pp.size();
         }).collect();     
@@ -291,11 +481,11 @@ public class LoadBalanceApp {
 
 		System.out.println("Counting duplicates (LPT)...");
     	// Calculate duplicates
-    	duplicates = pairs.values().count() - inputSize; 
+    	long duplicates = pairs.values().count() - inputSize; 
     	System.out.println("Duplicates counted (LPT)...");
     	
     	System.out.println("Counting partitions (LPT)...");
-    	partitions = groupedPairs.keys().count();
+    	long partitions = groupedPairs.keys().count();
     	System.out.println("Partitions counted (LPT)...");            	
     	
     	csvWriter.append("LPT," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
@@ -303,31 +493,33 @@ public class LoadBalanceApp {
 				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
     }
     
-    private void quadTreeTest(double minX, double minY, double maxX, double maxY,
+    private static void quadTreeTest(double minX, double minY, double maxX, double maxY,
     		double samplePercentage, int sampleSize, int samplePointsPerLeaf, double radius, JavaRDD<FeatureObject> points,
-    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter) throws IOException {
-    	for (int c = 0; c < numberOfWorkers; c++) workers[c] = 0;
+    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter,
+    		JavaPairRDD<Integer, FeatureObject> pairs, JavaPairRDD<Integer, List<FeatureObject>> groupedPairs,
+    		List<Tuple2<Integer, Integer>> counts, int[] workers, int inputSize) throws IOException {
+    	for (int c = 0; c < workers.length; c++) workers[c] = 0;
     	stj.resetBins();
     	System.out.println("Creating quad tree...");
-		startTime = System.nanoTime();
+		long startTime = System.nanoTime();
     	// Create quad tree (Global Indexing)
     	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
-    	indexCreationTime = System.nanoTime() - startTime;
+    	long indexCreationTime = System.nanoTime() - startTime;
     	System.out.println("Quad tree created...");
     	rr.assignDataToReducer(stj.getBins());
     	// Broadcast quad tree
     	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
     	// Map points to cells
-    	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+    	pairs = stj.map(points, broadcastQuadTree, radius);            	
     	
     	// Group By Key
-    	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+    	groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
         	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
         	pp.sort(DataObject.Comparator);
         	return pp;
         });	// group by leaf id and sort values based on tag
     	
-    	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+    	counts = groupedPairs.mapValues(iter -> {
             List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
             return pp.size();
         }).collect();     
@@ -343,11 +535,11 @@ public class LoadBalanceApp {
     	
 		System.out.println("Counting duplicates (QT)...");
     	// Calculate duplicates
-    	duplicates = pairs.values().count() - inputSize; 
+    	long duplicates = pairs.values().count() - inputSize; 
     	System.out.println("Duplicates counted (QT)...");
     	
     	System.out.println("Counting partitions (QT)...");
-    	partitions = groupedPairs.keys().count();
+    	long partitions = groupedPairs.keys().count();
     	System.out.println("Partitions counted (QT)...");
 		
     	csvWriter.append("Quad Tree," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
@@ -355,30 +547,32 @@ public class LoadBalanceApp {
 				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
     }
     
-    private void regularGridTest(double minX, double minY, double maxX, double maxY,
+    private static void regularGridTest(double minX, double minY, double maxX, double maxY,
     		int hSectors, int vSectors, double radius, JavaRDD<FeatureObject> points,
-    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter) throws IOException {
-    	for (int c = 0; c < numberOfWorkers; c++) workers[c] = 0;
+    		JavaSparkContext sc, SpatioTextualJoin stj, RoundRobin rr, FileWriter csvWriter,
+    		JavaPairRDD<Integer, FeatureObject> pairs, JavaPairRDD<Integer, List<FeatureObject>> groupedPairs,
+    		List<Tuple2<Integer, Integer>> counts, int[] workers, int inputSize) throws IOException {
+    	for (int c = 0; c < workers.length; c++) workers[c] = 0;
     	System.out.println("Creating regular grid...");
-    	startTime = System.nanoTime();
+    	long startTime = System.nanoTime();
     	// Create regular grid (Global Indexing)
     	RegularGrid grid = stj.createRegularGrid(minX, minY, maxX, maxY, hSectors, vSectors);
-    	indexCreationTime = System.nanoTime() - startTime;  
+    	long indexCreationTime = System.nanoTime() - startTime;  
     	System.out.println("Regular grid created...");
     	// Broadcast regular grid
     	Broadcast<RegularGrid> broadcastRegularGrid = sc.broadcast(grid);
     	
     	// Map points to cells
-    	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastRegularGrid, radius);               
+    	pairs = stj.map(points, broadcastRegularGrid, radius);               
     	
     	// Group By Key
-    	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey().mapValues(iter -> {
+    	groupedPairs = pairs.groupByKey().mapValues(iter -> {
         	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
         	pp.sort(DataObject.Comparator);
         	return pp;
         });	// group by leaf id and sort values based on tag
     	
-        List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+        counts = groupedPairs.mapValues(iter -> {
             List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
             return pp.size();
         }).collect();     
@@ -386,21 +580,21 @@ public class LoadBalanceApp {
         Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
     	Tuple2<Integer, Integer> n;
     	Integer load;
-    	rgBalanceIndex = 0;
+    	int rgBalanceIndex = 0;
     	while (iterator.hasNext()) {
     		n = iterator.next();
-    		load = rgBalanceIndex++ % numberOfWorkers;
+    		load = rgBalanceIndex++ % workers.length;
 			workers[load] +=  n._2;
     	}
        
     	
     	// Calculate duplicates
     	System.out.println("Counting duplicates (RG)...");
-    	duplicates = pairs.count() - inputSize;
+    	long duplicates = pairs.count() - inputSize;
     	System.out.println("Duplicates counted (RG)...");
     	
     	System.out.println("Counting partitions (RG)");            	
-    	partitions = groupedPairs.keys().count();
+    	long partitions = groupedPairs.keys().count();
     	System.out.println("Partitions counted (RG)...");
     	
     	csvWriter.append("Regular Grid," + inputSize + ",," + radius + "," + hSectors + "x" + vSectors + ",," + 
