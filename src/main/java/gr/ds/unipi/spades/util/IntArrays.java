@@ -1,6 +1,13 @@
 package gr.ds.unipi.spades.util;
 
 public class IntArrays {
+	public static boolean contains(int n, int[] arr) {
+		for (int i: arr) {
+			if (i == n) return true;
+		}
+		return false;
+	}
+	
 	public static int min(int[] arr) {
 		int min = Integer.MAX_VALUE;
 		for (int i : arr) {
