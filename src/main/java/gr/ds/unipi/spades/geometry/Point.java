@@ -4,6 +4,7 @@ import java.util.Comparator;
 
 public class Point {
 	private double  x, y;
+	private int tag;
     
 	public Point() {
 		x = 0;
@@ -14,6 +15,16 @@ public class Point {
         this.x = x;
         this.y = y;
     }  
+    
+    public Point(double x, double y, int tag) {
+        this.x = x;
+        this.y = y;
+        this.tag = tag;
+    }  
+    
+    public int getTag() {
+    	return tag;
+    }
 
     public double getX() {
         return x;
@@ -21,6 +32,10 @@ public class Point {
 
     public double getY() {
         return y;
+    }
+    
+    public void setTag(int tag) {
+    	this.tag = tag;
     }
     
     public void setX(double x) {

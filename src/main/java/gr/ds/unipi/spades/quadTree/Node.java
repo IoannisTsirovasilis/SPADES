@@ -10,6 +10,10 @@ public class Node extends Rectangle {
     private boolean hasChildrenQuadrants = false;
     private Point[] points;
     private int numberOfAssignedPoints = 0;
+    
+    // the number of contained points from each dataset (sampling phase)
+    private int lDatasetPoints = 0;
+    private int rDatasetPoints = 0;
 	
     public Node() {
     	id = newId();
@@ -19,6 +23,15 @@ public class Node extends Rectangle {
     	super(minX, minY, maxX, maxY);
         this.parent = parent;
         id = newId();
+    }
+    
+    public boolean duplicateLeftDataset() {
+    	return lDatasetPoints <= rDatasetPoints;
+    }
+    
+    public void increaseLRDatasetPoints(boolean isLeftDataset) {
+    	if (isLeftDataset) lDatasetPoints++;
+    	else rDatasetPoints++;
     }
 
     public Node getParent() {

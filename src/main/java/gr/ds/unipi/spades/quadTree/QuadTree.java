@@ -61,7 +61,7 @@ public class QuadTree {
     
     public Node insertPointGetNode(Point point) {
     	return insertPointGetNode(root, point);
-    }
+    }    
     
     public void insertPoint(Point point) {
         insertPoint(root, point);
@@ -164,6 +164,58 @@ public class QuadTree {
     	return pairs;
     }
     
+    // Used for LR Dataset duplication
+    public ArrayList<Tuple2<Integer, FeatureObject>> duplicateToLeafNodes(Node node, int enclosingNodeId, boolean duplicateL,
+    		FeatureObject featureObject) {
+    	
+    	// Array list containing the pairs (leaf id, point)
+    	ArrayList<Tuple2<Integer, FeatureObject>> pairs = new ArrayList<Tuple2<Integer, FeatureObject>>();
+    	
+    	if (featureObject.getTag() == 2) {
+    		// If it's NOT a leaf node, then explore children
+        	if (node.hasChildrenQuadrants()) {
+        		
+        		// for each child node
+        		for (Node child : node.getChildren()) {    			
+        			// if child intersects with square
+        			if (child.intersects(featureObject.getSquareLowerX(), featureObject.getSquareLowerY(), featureObject.getSquareUpperX(), featureObject.getSquareUpperY())) {
+        				
+        				// Recursively explore its children
+                        pairs.addAll(duplicateToLeafNodes(child, enclosingNodeId, duplicateL, featureObject));
+                    }
+        		}
+        	// else if it is a leaf node
+            } else if (node.getId() != enclosingNodeId) {
+            	// assign point to this leaf
+            	pairs.add(new Tuple2<Integer, FeatureObject>(node.getId(), featureObject));
+            }
+        	
+        	return pairs;
+        // if tag == 2 and we DONT duplicate 1 tags
+    	} else if (duplicateL) {
+    		// If it's NOT a leaf node, then explore children
+        	if (node.hasChildrenQuadrants()) {
+        		
+        		// for each child node
+        		for (Node child : node.getChildren()) {    			
+        			// if child intersects with square
+        			if (child.intersects(featureObject.getSquareLowerX(), featureObject.getSquareLowerY(), 
+        					featureObject.getSquareUpperX(), featureObject.getSquareUpperY()) && child.duplicateLeftDataset()) {
+        				
+        				// Recursively explore its children
+                        pairs.addAll(duplicateToLeafNodes(child, enclosingNodeId, duplicateL, featureObject));
+                    }
+        		}
+        	// else if it is a leaf node
+            } else if (node.getId() != enclosingNodeId) {
+            	// assign point to this leaf
+            	pairs.add(new Tuple2<Integer, FeatureObject>(node.getId(), featureObject));
+            }
+    	}
+    	
+    	return pairs;
+    }
+    
     // Recursive method for assigning a point to a leaf
     // This method could simply return a Tuple2<Integer, Point>, 
     // but Sparks' flatMapToPair demands an iterator
@@ -178,8 +230,20 @@ public class QuadTree {
     	
     	ArrayList<Tuple2<Integer, FeatureObject>> pair = new ArrayList<Tuple2<Integer, FeatureObject>>();
     	pair.add(new Tuple2<Integer, FeatureObject>(node.getId(), point));
-    	node.increaseNumberOfAssignedPoints();
     	return pair;
+    }
+    
+    // Used for LR Dataset Duplication
+    public Node getEnclosingNode(Node node, FeatureObject point) {
+    	if (node.hasChildrenQuadrants()) {
+    		for (Node child : node.getChildren()) {
+    			if (child.contains(point)) {
+                    return getEnclosingNode(child, point);
+                }
+    		}
+        } 
+    	
+    	return node;
     }
     
     public Tuple2<Integer, Point> assignToLeafNode(Node node, Point point) {
@@ -303,7 +367,7 @@ public class QuadTree {
 
         node.getPoints()[node.getNumberOfContainedPoints()] = point;
         node.increaseByOneNumberOfContainedPoints();
-
+        node.increaseLRDatasetPoints(point.getTag() == 1);
     }
 
     public String toString() {

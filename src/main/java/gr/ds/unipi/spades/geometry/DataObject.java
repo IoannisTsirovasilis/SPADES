@@ -3,17 +3,11 @@ package gr.ds.unipi.spades.geometry;
 import java.util.Comparator;
 
 public class DataObject extends Point {   
-	private int tag;
 	
 	public DataObject() {}
 	
     public DataObject(double x, double y, int tag) {
-        super(x, y);
-        this.tag = tag;
-    }  
-    
-    public int getTag() {
-    	return tag;
+        super(x, y, tag);
     }
     
     // A custom comparator that sorts objects such that data objects come before feature objects
