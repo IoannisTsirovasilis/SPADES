@@ -48,6 +48,9 @@ public class LoadBalanceApp {
 	static String FILE_PATH, file1, file2, localFilePath;
 	static int numberOfWorkers, sampleSize, inputSize;
 	static double samplePercentage;
+	static long startingTime;
+	static double toSecondsFactor = Math.pow(10, 9);
+	static long partitions, duplicates, outPairs;
 	
 	private static void regularGridTest(int gridSize) throws IOException {
 		int hSectors = gridSize; 
@@ -123,18 +126,21 @@ public class LoadBalanceApp {
     	}
 	}
 	
-	private static void quadTreeTest(int samplePointsPerLeaf) {
+	private static void quadTreeTest(int samplePointsPerLeaf, int type) throws IOException {
 		double radius = 0;
-		long startTime, indexCreationTime, duplicates, partitions;
+		//long startTime, indexCreationTime, duplicates, partitions;
 		int load;
+		FileWriter fw = null;
 		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
     		try {
     			System.out.println((i + 1) + " iteration...");
-        		if (i == 0) {
+    			fw = new FileWriter(localFilePath + "SpadesFinal/qt_rr_" + type + "_" + i + ".csv");
+    			addLabelsWorkers(fw);
+    			if (i == 0) {
         			radius = 2;
-        		} else if (i == 3) {
+        		} else if (i == numberOfRunsPerFileSet / 3) {
         			radius = 4;
-        		} else if (i == 6) {
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
         			radius = 6;
         		}
         		
@@ -143,10 +149,10 @@ public class LoadBalanceApp {
             	for (int c = 0; c < workers.length; c++) workers[c] = 0;
             	stj.resetBins();
             	System.out.println("Creating quad tree...");
-        		startTime = System.nanoTime();
+        		//startTime = System.nanoTime();
             	// Create quad tree (Global Indexing)
-            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
-            	indexCreationTime = System.nanoTime() - startTime;
+            	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points, radius);
+            	//indexCreationTime = System.nanoTime() - startTime;
             	System.out.println("Quad tree created...");
             	rr.assignDataToReducer(stj.getBins());
             	// Broadcast quad tree
@@ -161,6 +167,12 @@ public class LoadBalanceApp {
                 	return pp;
                 });	// group by leaf id and sort values based on tag
             	
+        		startingTime = System.nanoTime();
+            	
+            	outPairs = stj.reduce(groupedPairs, radius).count();
+            	
+            	startingTime = System.nanoTime() - startingTime;
+            	
             	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
                     List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                     return pp.size();
@@ -174,6 +186,10 @@ public class LoadBalanceApp {
         			workers[load] +=  n._2;
             	}
             	
+            	for (int j = 0; j < workers.length; j++) {
+            		fw.append(j + "," + workers[j] + "\n");
+            	}
+            	
         		System.out.println("Counting duplicates (QT)...");
             	// Calculate duplicates
             	duplicates = pairs.values().count() - inputSize; 
@@ -182,43 +198,462 @@ public class LoadBalanceApp {
             	System.out.println("Counting partitions (QT)...");
             	partitions = groupedPairs.keys().count();
             	System.out.println("Partitions counted (QT)...");
-        		
-            	csvWriter.append("QT" + samplePointsPerLeaf + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            	
+            	
+            	
+        		csvWriter.append("QT_rr_" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
             			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
-        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "," + outPairs + "," + (startingTime / toSecondsFactor) + "\n");
+            	      		
         		// --------------------- END QUAD TREE MBR CHECK ---------------------        
     		} catch (Exception ex) {
     			Toolkit.getDefaultToolkit().beep();
     		} finally {
-    			Toolkit.getDefaultToolkit().beep();    			
+    			Toolkit.getDefaultToolkit().beep();    
+    			fw.flush();
+    			fw.close();
     		}
     	}
 	}
 	
-	private static void lptTest(int samplePointsPerLeaf, int type) {
+	private static void quadTreeJSTest(int samplePointsPerLeaf) throws IOException {
 		double radius = 0;
-		long partitions, duplicates, startTime, indexCreationTime;
+		long startTime, indexCreationTime, duplicates, partitions;
 		int load;
+		FileWriter fw = null;
 		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
     		try {
     			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SJ/qt" + samplePointsPerLeaf + "_" + i + ".csv");
+    			addLabelsJS(fw);
+        		if (i == 0) {
+        			radius = 2;
+        		} else if (i == numberOfRunsPerFileSet / 3) {
+        			radius = 4;
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
+        			radius = 6;
+        		}
+        		
+        		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
+            	
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree...");
+        		startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	indexCreationTime = System.nanoTime() - startTime;
+            	System.out.println("Quad tree created...");
+            	
+            	List<Tuple2<Integer, Double>> sampleJSPairs = calculateSampleJoinSelectivity(qt.getRoot(), radius);
+
+            	
+            	rr.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+        		
+            	List<Tuple2<Integer, Double>> JSpairs = stj.reduceJoinSelectivity(groupedPairs, radius).collect();
+            	
+            	for (Tuple2<Integer, Double> samplePair : sampleJSPairs) {
+            		for (Tuple2<Integer, Double> pair : JSpairs) {
+            			if (pair._1.intValue() == samplePair._1.intValue()) {
+            				fw.append(pair._1.intValue() + "," + pair._2 + "," + samplePair._2 + "," + (pair._2 - samplePair._2) + "\n");
+            				break;
+            			}
+            		}
+            	}
+            	
+            	
+            	
+            	
+        		// --------------------- END QUAD TREE MBR CHECK ---------------------   
+    		} catch (Throwable e) {
+    			e.printStackTrace();
+    			Toolkit.getDefaultToolkit().beep();
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep();    	
+    			fw.flush();
+            	fw.close();
+    		}
+    	}
+	}
+	
+	private static void quadTreeDuplicateTest(int samplePointsPerLeaf, int type) throws IOException {
+		double radius = 0;
+		//long startTime, indexCreationTime, duplicates, partitions;
+		int load;
+		FileWriter fw = null;
+		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
+    		try {
+    			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SpadesFinal/qt" + type + "_" + i + ".csv");
+    			addLabelsWorkers(fw);
     			if (i == 0) {
         			radius = 2;
-        		} else if (i == 3) {
+        		} else if (i == numberOfRunsPerFileSet / 3) {
         			radius = 4;
-        		} else if (i == 6) {
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
         			radius = 6;
-        		} 	
-            	// --------------------- QUAD TREE LPT APPROXIMATION ---------------------
+        		}
+        		
+        		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
+            	
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree...");
+        		//startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	//indexCreationTime = System.nanoTime() - startTime;
+            	System.out.println("Quad tree created...");
+            	rr.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(rr).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+        		startingTime = System.nanoTime();
+            	
+            	outPairs = stj.reduce(groupedPairs, radius).count();
+            	
+            	startingTime = System.nanoTime() - startingTime;
+            	
+            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
+                Tuple2<Integer, Integer> n;                
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = rr.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+            	
+            	for (int j = 0; j < workers.length; j++) {
+            		fw.append(j + "," + workers[j] + "\n");
+            	}
+            	
+        		System.out.println("Counting duplicates (QT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (QT)...");
+            	
+            	System.out.println("Counting partitions (QT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (QT)...");
+            	
+            	
+            	
+        		csvWriter.append("QT" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "," + outPairs + "," + (startingTime / toSecondsFactor) + "\n");
+            	      		
+        		// --------------------- END QUAD TREE MBR CHECK ---------------------        
+    		} catch (Exception ex) {
+    			Toolkit.getDefaultToolkit().beep();
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep();    
+    			fw.flush();
+    			fw.close();
+    		}
+    	}
+	}
+	
+	private static void lptJSTest(int samplePointsPerLeaf, int type) throws IOException {
+		double radius = 0;
+		long startTime, indexCreationTime, duplicates, partitions;
+		int load;
+		FileWriter fw = null;
+		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
+    		try {
+    			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SJ/lpt" + type + "_" + i + ".csv");
+    			addLabelsJS(fw);
+        		if (i == 0) {
+        			radius = 2;
+        		} else if (i == numberOfRunsPerFileSet / 3) {
+        			radius = 4;
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
+        			radius = 6;
+        		}
+        		
+        		// ------------ QUAD TREE (~ CONSTANT NUMBER OF LEAVES) ---------------
             	
             	for (int c = 0; c < workers.length; c++) workers[c] = 0;
             	stj.resetBins();
             	System.out.println("Creating quad tree (LPT)...");
             	startTime = System.nanoTime();
             	// Create quad tree (Global Indexing)
-            	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points, radius);
             	System.out.println("Quad tree created (LPT)...");
             	indexCreationTime = System.nanoTime() - startTime;
+            	
+            	List<Tuple2<Integer, Double>> sampleJSPairs = calculateSampleJoinSelectivity(qt.getRoot(), radius);
+            	
+            	lb.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);     
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();
+        		
+            	List<Tuple2<Integer, Double>> JSpairs = stj.reduceJoinSelectivity(groupedPairs, radius).collect();
+            	
+            	for (Tuple2<Integer, Double> samplePair : sampleJSPairs) {
+            		for (Tuple2<Integer, Double> pair : JSpairs) {
+            			if (pair._1.intValue() == samplePair._1.intValue()) {
+            				fw.append(pair._1.intValue() + "," + pair._2 + "," + samplePair._2 + "," + (pair._2 - samplePair._2) + "\n");
+            				break;
+            			}
+            		}
+            	}
+            	
+        		// --------------------- END QUAD TREE MBR CHECK ---------------------   
+    		} catch (Throwable e) {
+    			e.printStackTrace();
+    			Toolkit.getDefaultToolkit().beep();
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep();    	
+    			fw.flush();
+            	fw.close();
+    		}
+    	}
+	}
+	
+	private static void lptTest(int samplePointsPerLeaf, int type) throws IOException {
+		double radius = 0;
+		//long partitions, duplicates, startTime, indexCreationTime;
+		int load;
+		FileWriter fw = null;
+		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
+    		try {
+    			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SpadesFinal/LPT_n2_" + type + "_" + i + ".csv");
+    			addLabelsWorkers(fw);
+    			if (i == 0) {
+        			radius = 2;
+        		} else if (i == numberOfRunsPerFileSet / 3) {
+        			radius = 4;
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
+        			radius = 6;
+        		}	
+            	// --------------------- QUAD TREE LPT APPROXIMATION ---------------------
+            	
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree (LPT)...");
+            	//startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points, radius);
+            	System.out.println("Quad tree created (LPT)...");
+            	//indexCreationTime = System.nanoTime() - startTime;
+            	lb.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	startingTime = System.nanoTime();
+            	
+            	outPairs = stj.reduce(groupedPairs, radius).count();
+            	
+            	startingTime = System.nanoTime() - startingTime;
+            	
+            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
+                Tuple2<Integer, Integer> n;
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = lb.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+            	
+            	for (int j = 0; j < workers.length; j++) {
+            		fw.append(j + "," + workers[j] + "\n");
+            	}            	
+
+        		System.out.println("Counting duplicates (LPT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (LPT)...");
+            	
+            	System.out.println("Counting partitions (LPT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (LPT)..."); 
+            	
+        		csvWriter.append("LPT_n2_" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "," + outPairs + "," + (startingTime / toSecondsFactor) + "\n");
+            	
+            	
+            	// --------------------- END QUAD TREE NORMAL ---------------------
+    		} catch (Exception ex) {
+    			Toolkit.getDefaultToolkit().beep();
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep(); 
+    			fw.flush();
+    			fw.close();
+    		}
+    	}
+	}
+
+	private static void lptDuplicateTest(int samplePointsPerLeaf, int type) throws IOException {
+		double radius = 0;
+		//long partitions, duplicates, startTime, indexCreationTime;
+		int load;
+		FileWriter fw = null;
+		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
+    		try {
+    			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SpadesFinal/lpt_" + type + "_" + i + ".csv");
+    			addLabelsWorkers(fw);
+    			if (i == 0) {
+        			radius = 2;
+        		} else if (i == numberOfRunsPerFileSet / 3) {
+        			radius = 4;
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
+        			radius = 6;
+        		}	
+            	// --------------------- QUAD TREE LPT APPROXIMATION ---------------------
+            	
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree (LPT)...");
+            	//startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTreeLPT(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points, radius);
+            	System.out.println("Quad tree created (LPT)...");
+            	//indexCreationTime = System.nanoTime() - startTime;
+            	lb.assignDataToReducer(stj.getBins());
+            	// Broadcast quad tree
+            	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
+            	
+            	// Map points to cells
+            	JavaPairRDD<Integer, FeatureObject> pairs = stj.map(points, broadcastQuadTree, radius);            	
+            	
+            	// Group By Key
+            	JavaPairRDD<Integer, List<FeatureObject>> groupedPairs = pairs.groupByKey(lb).mapValues(iter -> {
+                	List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                	pp.sort(DataObject.Comparator);
+                	return pp;
+                });	// group by leaf id and sort values based on tag
+            	
+            	startingTime = System.nanoTime();
+            	
+            	outPairs = stj.reduce(groupedPairs, radius).count();
+            	
+            	startingTime = System.nanoTime() - startingTime;
+            	
+            	List<Tuple2<Integer, Integer>> counts = groupedPairs.mapValues(iter -> {
+                    List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
+                    return pp.size();
+                }).collect();     
+                
+                Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
+                Tuple2<Integer, Integer> n;
+            	while (iterator.hasNext()) {
+            		n = iterator.next();
+            		load = lb.loads.get(n._1);
+        			workers[load] +=  n._2;
+            	}
+            	
+            	for (int j = 0; j < workers.length; j++) {
+            		fw.append(j + "," + workers[j] + "\n");
+            	}
+            	
+        		System.out.println("Counting duplicates (LPT)...");
+            	// Calculate duplicates
+            	duplicates = pairs.values().count() - inputSize; 
+            	System.out.println("Duplicates counted (LPT)...");
+            	
+            	System.out.println("Counting partitions (LPT)...");
+            	partitions = groupedPairs.keys().count();
+            	System.out.println("Partitions counted (LPT)...");            	
+            	
+        		csvWriter.append("LPT" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+            			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "," + outPairs + "," + (startingTime / toSecondsFactor) + "\n");
+            	
+            	// --------------------- END QUAD TREE NORMAL ---------------------
+    		} catch (Exception ex) {
+    			Toolkit.getDefaultToolkit().beep();
+    		} finally {
+    			Toolkit.getDefaultToolkit().beep();    			
+    			fw.flush();
+    			fw.close();
+    		}
+    	}
+	}
+	
+	private static void lptNoRadiusTest(int samplePointsPerLeaf, int type) throws IOException {
+		double radius = 0;
+		//long partitions, duplicates, startTime, indexCreationTime;
+		int load;
+		FileWriter fw = null;
+		for (int i = 0; i < numberOfRunsPerFileSet; i++) {
+    		try {
+    			System.out.println((i + 1) + " iteration...");
+    			fw = new FileWriter(localFilePath + "SpadesFinal/LPT_n1_" + type + "_" + i + ".csv");
+    			addLabelsWorkers(fw);
+    			if (i == 0) {
+        			radius = 2;
+        		} else if (i == numberOfRunsPerFileSet / 3) {
+        			radius = 4;
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
+        			radius = 6;
+        		}	
+            	// --------------------- QUAD TREE LPT APPROXIMATION ---------------------
+            	
+            	for (int c = 0; c < workers.length; c++) workers[c] = 0;
+            	stj.resetBins();
+            	System.out.println("Creating quad tree (LPT)...");
+            	//startTime = System.nanoTime();
+            	// Create quad tree (Global Indexing)
+            	QuadTree qt = stj.createQuadTree(minX, minY, maxX, maxY, samplePointsPerLeaf, sampleSize, points);
+            	System.out.println("Quad tree created (LPT)...");
+            	//indexCreationTime = System.nanoTime() - startTime;
             	lb.assignDataToReducer(stj.getBins());
             	// Broadcast quad tree
             	Broadcast<QuadTree> broadcastQuadTree = sc.broadcast(qt);
@@ -237,6 +672,12 @@ public class LoadBalanceApp {
                     List<FeatureObject> pp = new ArrayList<FeatureObject>((Collection<FeatureObject>) iter);
                     return pp.size();
                 }).collect();     
+            	
+            	startingTime = System.nanoTime();
+            	
+            	outPairs = stj.reduce(groupedPairs, radius).count();
+            	
+            	startingTime = System.nanoTime() - startingTime;
                 
                 Iterator<Tuple2<Integer, Integer>> iterator = counts.iterator();
                 Tuple2<Integer, Integer> n;
@@ -244,6 +685,10 @@ public class LoadBalanceApp {
             		n = iterator.next();
             		load = lb.loads.get(n._1);
         			workers[load] +=  n._2;
+            	}
+            	
+            	for (int j = 0; j < workers.length; j++) {
+            		fw.append(j + "," + workers[j] + "\n");
             	}
 
         		System.out.println("Counting duplicates (LPT)...");
@@ -253,17 +698,20 @@ public class LoadBalanceApp {
             	
             	System.out.println("Counting partitions (LPT)...");
             	partitions = groupedPairs.keys().count();
-            	System.out.println("Partitions counted (LPT)...");            	
+            	System.out.println("Partitions counted (LPT)..."); 
             	
-            	csvWriter.append("LPT" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
+        		csvWriter.append("LPT_nR_" + type + "," + inputSize + "," + sampleSize + "," + radius + ",," + samplePointsPerLeaf + "," + 
             			partitions + "," + duplicates + "," + IntArrays.min(workers) + "," + IntArrays.max(workers)
-        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "\n");
+        				+ "," + IntArrays.mean(workers) + "," + IntArrays.std(workers) + "," + outPairs + "," + (startingTime / toSecondsFactor) + "\n");
+            	
             	
             	// --------------------- END QUAD TREE NORMAL ---------------------
     		} catch (Exception ex) {
     			Toolkit.getDefaultToolkit().beep();
     		} finally {
-    			Toolkit.getDefaultToolkit().beep();    			
+    			Toolkit.getDefaultToolkit().beep(); 
+    			fw.flush();
+    			fw.close();
     		}
     	}
 	}
@@ -277,11 +725,11 @@ public class LoadBalanceApp {
     			System.out.println((i + 1) + " iteration...");
     			if (i == 0) {
         			radius = 2;
-        		} else if (i == 3) {
+        		} else if (i == numberOfRunsPerFileSet / 3) {
         			radius = 4;
-        		} else if (i == 6) {
+        		} else if (i == 2 * numberOfRunsPerFileSet / 3) {
         			radius = 6;
-        		} 	 
+        		}
     			
         		// GeoSpark
             	
@@ -344,17 +792,17 @@ public class LoadBalanceApp {
 	public static void main(String[] args) throws IOException
     {
     	// Initialize spark context
-		numberOfRunsPerFileSet = 9;
+		numberOfRunsPerFileSet = 18;
 		numberOfWorkers = 10;
-		inputSize = 500_000;
+		inputSize = 250_000;
     	minX = -7.5;
     	minY = -10;
     	maxX = 12.5;
     	maxY = 6;    	
     	samplePercentage = 0.01; 
-		file1 = "skewedL_500K.txt";
-    	file2 = "skewedR_500K.txt";
-    	String outFile = "spatiotextual_500K.csv";
+		file1 = "skewedL_250K.txt";
+    	file2 = "skewedR_250K.txt";
+    	String outFile = "spatiotextual_250K_Final_2.csv";
     	
     	sampleSize = (int) (samplePercentage * inputSize);
     	workers = new int[numberOfWorkers];
@@ -402,20 +850,31 @@ public class LoadBalanceApp {
     	//long resultTime = 0;    	
     	
     	Broadcast<SpatioTextualJoin> broadcastStj = sc.broadcast(stj);
-    	JavaRDD<String> file = sc.textFile(pathToCsv);	
+    	JavaRDD<String> file = sc.textFile(pathToCsv);
+    	
 		// Iterate through experiment setups
     	points = stj.mapToPoints(file, broadcastStj);
     	
-    	regularGridTest(50);
-    	regularGridTest(100);
-    	regularGridTest(150);
-    	quadTreeTest(1);
-    	quadTreeTest(5);
-    	quadTreeTest(10);
-    	lptTest((int) (sampleSize / (5 * workers.length)), 5);
-    	lptTest((int) (sampleSize / (10 * workers.length)), 10);
-    	lptTest((int) (sampleSize / (20 * workers.length)), 20);	
-    	geoSparkTest((int) (sampleSize / workers.length));
+    	// Round Robin
+    	quadTreeDuplicateTest(sampleSize / (5 * workers.length), 5);
+    	quadTreeDuplicateTest(sampleSize / (10 * workers.length), 10);
+    	quadTreeDuplicateTest(sampleSize / (20 * workers.length), 20);
+    	
+    	
+    	// Round Robing, Radius QT
+    	quadTreeTest(sampleSize / (5 * workers.length), 5);
+    	quadTreeTest(sampleSize / (10 * workers.length), 10);
+    	quadTreeTest(sampleSize / (20 * workers.length), 20);
+    	
+    	// LPT
+    	lptNoRadiusTest((int) (sampleSize / (5 * workers.length)), 5);
+    	lptNoRadiusTest((int) (sampleSize / (10 * workers.length)), 10);
+    	lptNoRadiusTest((int) (sampleSize / (20 * workers.length)), 20);    
+    	
+    	// LPT, Radius QT
+    	lptDuplicateTest((int) (sampleSize / (5 * workers.length)), 5);
+    	lptDuplicateTest((int) (sampleSize / (10 * workers.length)), 10);
+    	lptDuplicateTest((int) (sampleSize / (20 * workers.length)), 20);
     	
     	csvWriter.flush();
 		csvWriter.close();
@@ -451,7 +910,29 @@ public class LoadBalanceApp {
         return out; 
     } 
     
+    private static List<Tuple2<Integer, Double>> calculateSampleJoinSelectivity(Node node, double radius) {
+    	ArrayList<Tuple2<Integer, Double>> pairs = new ArrayList<Tuple2<Integer, Double>>();
+		if (node.hasChildrenQuadrants()) {
+			Node[] children = node.getChildren();
+			for (int i = 0; i < children.length; i++) {
+				pairs.addAll(calculateSampleJoinSelectivity(children[i], radius));
+			}
+		} else {
+			pairs.add(new Tuple2<Integer, Double>(node.getId(), stj.getSampleJoinSelectivity(node, radius)));
+		}
+		
+		return pairs;
+    }
+     
     private static void addLabels(FileWriter fw) throws IOException {
-    	fw.append("Structure,Input Size,Sample Size,Radius,Grid Size,Sample Input Per Leaf,Partitions,Duplicates,Min,Max,Mean,Std\n");
+    	fw.append("Structure,Input Size,Sample Size,Radius,Grid Size,Sample Input Per Leaf,Partitions,Duplicates,Min,Max,Mean,Std,Pairs,Time(s)\n");
+    }
+    
+    private static void addLabelsJS(FileWriter fw) throws IOException {
+    	fw.append("Partition,Actual,Estimated,Difference\n");
+    }
+    
+    private static void addLabelsWorkers(FileWriter fw) throws IOException {
+    	fw.append("Worker,Points\n");
     }
 }

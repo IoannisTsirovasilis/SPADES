@@ -1,5 +1,7 @@
 package gr.ds.unipi.spades.quadTree;
 
+import java.util.ArrayList;
+
 import gr.ds.unipi.spades.geometry.Point;
 import gr.ds.unipi.spades.geometry.Rectangle;
 
@@ -8,7 +10,7 @@ public class Node extends Rectangle {
     private static int idCounter = 0;
     private int numberOfContainedPoints = 0;
     private boolean hasChildrenQuadrants = false;
-    private Point[] points;
+    private ArrayList<Point> points;
     private int numberOfAssignedPoints = 0;
     
     // the number of contained points from each dataset (sampling phase)
@@ -23,6 +25,14 @@ public class Node extends Rectangle {
     	super(minX, minY, maxX, maxY);
         this.parent = parent;
         id = newId();
+    }
+    
+    public int getLDatasetPoints() {
+    	return lDatasetPoints;
+    }
+    
+    public int getRDatasetPoints() {
+    	return rDatasetPoints;
     }
     
     public boolean duplicateLeftDataset() {
@@ -112,11 +122,11 @@ public class Node extends Rectangle {
         return children[3];
     }   
 
-    public Point[] getPoints() {
+    public ArrayList<Point> getPoints() {
         return points;
     }
 
-    public void setPoints(Point[] points) {
+    public void setPoints(ArrayList<Point> points) {
         this.points = points;
     }
 

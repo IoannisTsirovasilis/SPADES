@@ -1,13 +1,17 @@
 package gr.ds.unipi.spades.queries;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Scanner;
 
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.MapFunction;
 import org.apache.spark.broadcast.Broadcast;
 
 import gr.ds.unipi.spades.geometry.DataObject;
@@ -21,6 +25,7 @@ import scala.Tuple2;
 
 public class SpatioTextualJoin extends Query {
 	public JavaRDD<Tuple2<Integer, Integer>> resultPairs;
+	public JavaRDD<Tuple2<FeatureObject, FeatureObject>> resultPairsTest;
 	private int file1Tag, file2Tag, keywordsIndex;
 
 	private String keywordsSeparator;
@@ -34,6 +39,32 @@ public class SpatioTextualJoin extends Query {
 		this.file2Tag = file2Tag;
 		this.keywordsIndex = keywordsIndex;
 		this.keywordsSeparator = keywordsSeparator;
+	}
+	
+	public double getSampleJoinSelectivity(Node node, double radius) {
+		if (node.getLDatasetPoints() == 0 || node.getRDatasetPoints() == 0) {
+			return -1;
+		}
+		
+		Point[] lPoints = new Point[node.getLDatasetPoints()];
+		Point[] rPoints = new Point[node.getRDatasetPoints()];
+		int l = 0;
+		int r = 0;
+		for (int i = 0; i < node.getNumberOfContainedPoints(); i++) {
+			System.out.println("l=" + l + " - r=" + r);
+			if (node.getPoints().get(i).getTag() == 1) lPoints[l++] = node.getPoints().get(i);
+			else rPoints[r++] = node.getPoints().get(i);
+		}
+		double numerator = 0;
+		for (l = 0; l < lPoints.length; l++) {
+			for (r = 0; r < rPoints.length; r++) {
+				if (MathUtils.haversineDistance(lPoints[l], rPoints[r]) <= radius) {
+					numerator++;
+				}
+			}
+		}
+		
+		return numerator / (node.getLDatasetPoints() * node.getRDatasetPoints());
 	}
 	
 	public HashMap<Integer, Integer> getBins() {
@@ -65,7 +96,6 @@ public class SpatioTextualJoin extends Query {
 		
 		// sampling
 		List<FeatureObject> sample = points.takeSample(false, sampleSize);
-        
         for (FeatureObject p : sample) {
         	quadTree.insertPoint(p);
         }   
@@ -77,7 +107,7 @@ public class SpatioTextualJoin extends Query {
 	
 	// Create Global Index Quad Tree
 	public QuadTree createQuadTreeLPT(double minX, double minY, double maxX, double maxY, 
-			int samplePointsPerLeaf, int sampleSize, JavaRDD<FeatureObject> points) {
+			int samplePointsPerLeaf, int sampleSize, JavaRDD<FeatureObject> points, double radius) {
 		
 		// If a point is on the edges of the root's boundaries, it will throw an error. Adding a small padding
 		double epsilon = 0.00001;
@@ -88,7 +118,7 @@ public class SpatioTextualJoin extends Query {
         List<FeatureObject> sample = points.takeSample(false, sampleSize);
         
         for (FeatureObject p : sample) {
-        	quadTree.insertPoint(p);	        	
+        	quadTree.insertPoint(p, radius);	        	
         }   
         
         traverse(quadTree.getRoot());
@@ -217,12 +247,12 @@ public class SpatioTextualJoin extends Query {
         		}
         		
         		for (FeatureObject p : local) {			
-    				if (MathUtils.jaccardSimilarity(fo.getKeywords(), p.getKeywords()) > 0) {
+    				//if (MathUtils.jaccardSimilarity(fo.getKeywords(), p.getKeywords()) > 0) {
     					// Check if it is within the provided distance
             			if (MathUtils.haversineDistance(p, fo) <= radius) {
     						output.add(new Tuple2<Integer, Integer>(p.getTag(), fo.getTag()));
             			}
-    				}
+    				//}
     				
         		}
         	}        	
@@ -231,6 +261,71 @@ public class SpatioTextualJoin extends Query {
         });
         
         return resultPairs;
+	}
+	
+	public JavaRDD<Tuple2<FeatureObject, FeatureObject>> reduceForTest(JavaPairRDD<Integer, List<FeatureObject>> pairs, double radius) {        		
+		resultPairsTest = pairs.flatMap((FlatMapFunction<Tuple2<Integer, List<FeatureObject>>, Tuple2<FeatureObject, FeatureObject>>) pair -> {
+        	
+        	// output is used to hold result point pairs 
+        	ArrayList<Tuple2<FeatureObject, FeatureObject>> output = new ArrayList<Tuple2<FeatureObject, FeatureObject>>();
+        	
+        	// Array list to retain data objects in memory
+        	ArrayList<FeatureObject> local = new ArrayList<FeatureObject>();       	
+        	
+        	for (FeatureObject fo : pair._2) {
+        		
+        		// Load objects of "Left" dataset
+        		if (fo.getTag() == 1) { 
+        			local.add(fo);
+        			continue;
+        		}
+        		
+        		for (FeatureObject p : local) {			
+    				//if (MathUtils.jaccardSimilarity(fo.getKeywords(), p.getKeywords()) > 0) {
+    					// Check if it is within the provided distance
+            			if (MathUtils.haversineDistance(p, fo) <= radius) {
+    						output.add(new Tuple2<FeatureObject, FeatureObject>(p, fo));
+            			}
+    				//}
+    				
+        		}
+        	}        	
+        	
+        	return output.iterator();
+        });
+        
+        return resultPairsTest;
+	}
+	
+	public JavaRDD<Tuple2<Integer, Double>> reduceJoinSelectivity(JavaPairRDD<Integer, List<FeatureObject>> pairs, double radius) {        		
+        return pairs.map((Function<Tuple2<Integer, List<FeatureObject>>, Tuple2<Integer, Double>>) pair -> {
+        	
+        	// Array list to retain data objects in memory
+        	ArrayList<FeatureObject> local = new ArrayList<FeatureObject>();       	
+        	double numerator = 0;
+        	int lDataset = 0;
+        	int rDataset = 0;
+        	for (FeatureObject fo : pair._2) {
+        		
+        		// Load objects of "Left" dataset
+        		if (fo.getTag() == 1) { 
+        			local.add(fo);
+        			lDataset++;
+        			continue;
+        		}
+        		
+        		for (FeatureObject p : local) {			
+        			rDataset++;
+        			if (MathUtils.haversineDistance(p, fo) <= radius) {
+						numerator++;
+        			}
+        		}
+        	}        	
+        	if (lDataset == 0 || rDataset == 0) {
+        		return new Tuple2<Integer, Double>(pair._1, -1.0);
+        	}
+        	return new Tuple2<Integer, Double>(pair._1, numerator / (lDataset * rDataset));
+        });
 	}
 	
 	private JavaPairRDD<Integer, FeatureObject> assignPointsToNodes(JavaRDD<FeatureObject> points, Broadcast<? extends Object> broadcastSpatialIndex, 
@@ -268,16 +363,20 @@ public class SpatioTextualJoin extends Query {
         	
         	Node enclosingNode = qt.getEnclosingNode(qt.getRoot(), point);
         	ArrayList<Tuple2<Integer, FeatureObject>> result = new ArrayList<Tuple2<Integer, FeatureObject>>();
-        	result.add(new Tuple2<Integer, FeatureObject>(enclosingNode.getId(), point));
+        	//result.add(new Tuple2<Integer, FeatureObject>(enclosingNode.getId(), point));
         	
-        	// 0, 90, 180, 270 represents navigation bearing
-        	double squareUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
-        	double squareLowerY = MathUtils.getPointInDistanceAndBearing(point, radius, 180).getY();
-        	double squareUpperX = MathUtils.getPointInDistanceAndBearing(point, radius, 90).getX();
-        	double squareLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
+        	// if the cell is RED and the point is RED  (OR) the cell is BLUE and the point is BLUE, only then duplicate
+        	if ((enclosingNode.duplicateLeftDataset() && point.getTag() == 1) || (!enclosingNode.duplicateLeftDataset() && point.getTag() == 2)) {
+        		// 0, 90, 180, 270 represents navigation bearing
+            	double squareUpperY = MathUtils.getPointInDistanceAndBearing(point, radius, 0).getY();
+            	double squareLowerY = MathUtils.getPointInDistanceAndBearing(point, radius, 180).getY();
+            	double squareUpperX = MathUtils.getPointInDistanceAndBearing(point, radius, 90).getX();
+            	double squareLowerX = MathUtils.getPointInDistanceAndBearing(point, radius, 270).getX();
+            	
+            	point.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
+            	result.addAll(qt.duplicateToLeafNodes(qt.getRoot(), enclosingNode.getId(), enclosingNode.duplicateLeftDataset(), point));
+        	}
         	
-        	point.setSquare(squareLowerX, squareLowerY, squareUpperX, squareUpperY);
-        	result.addAll(qt.duplicateToLeafNodes(qt.getRoot(), enclosingNode.getId(), enclosingNode.duplicateLeftDataset(), point));
         	
         	return result.iterator();
         });	
